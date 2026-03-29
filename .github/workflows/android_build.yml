@@ -20,31 +20,28 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Build APK
+      - name: Build APK (FULL LIVE LOG)
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace > build_log.txt 2>&1
+          ./gradlew assembleDebug --stacktrace --console=plain | tee build_log.txt
 
-      - name: Upload APK to Telegram
+      - name: Send APK + Log (Success)
         if: success()
         env:
-          BOT_TOKEN: "8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4"
-          CHAT_ID: "7915367198"
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          curl -v -F document=@app/build/outputs/apk/debug/app-debug.apk \
-               -F caption="✅ تم البناء بنجاح يا ماهر! 🚀 النسخة جاهزة للتثبيت." \
+          curl -s -F document=@app/build/outputs/apk/debug/app-debug.apk \
+               -F document=@build_log.txt \
+               -F caption="✅ البناء نجح + السجل الكامل" \
                "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
 
-      - name: Send Error Log on Failure
+      - name: Send Log (Failure)
         if: failure()
         env:
-          BOT_TOKEN: "8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4"
-          CHAT_ID: "7915367198"
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          # استخراج أول 15 سطر من الخطأ لإرسالها
-          ERROR_SUMMARY=$(grep -i "error" build_log.txt | head -n 15)
-          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-               -d "chat_id=${CHAT_ID}" \
-               -d "text=❌ فشل البناء يا ماهر! إليك ملخص الأخطاء:
-               
-               ${ERROR_SUMMARY}"
+          curl -s -F document=@build_log.txt \
+               -F caption="❌ فشل البناء - السجل الكامل" \
+               "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
