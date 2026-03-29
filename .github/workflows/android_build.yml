@@ -1,0 +1,41 @@
+name: Android Build & Telegram Send
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle' # تفعيل كاش Gradle للمكتبات والـ Wrapper
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace # أضفنا stacktrace لمعرفة سبب أي خطأ مستقبلي
+
+      - name: Find APK File
+        run: |
+          APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "APK_PATH=$APK_FILE" >> $GITHUB_ENV
+
+      - name: Send APK to Telegram
+        run: |
+          BOT_TOKEN="8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4"
+          CHAT_ID="7915367198"
+          
+          curl -v -F document=@${{ env.APK_PATH }} \
+               -F caption="✅ تم بناء التطبيق بنجاح يا ماهر! 🚀" \
+               https://api.telegram.org/bot${BOT_TOKEN}/sendDocument
