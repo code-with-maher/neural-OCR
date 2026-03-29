@@ -1,32 +1,56 @@
 plugins {
-	id 'com.android.application'
+    id 'com.android.application'
 }
 
 android {
-	compileSdk 34
-	
-	useLibrary 'org.apache.http.legacy'
-	
-	defaultConfig {
-		applicationId "com.a.labs"
-		namespace "com.a.labs"
-		minSdkVersion 21
-		targetSdkVersion 34
-		versionCode 1
-		versionName "1.0"
-	}
-	
-	buildTypes {
-		release {
-			minifyEnabled false
-			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-		}
-	}
-	buildFeatures {
-		viewBinding true
-	}
+    namespace "com.a.labs"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.a.labs"
+        minSdkVersion 24 // رفعتها لـ 24 لضمان عمل Compose بسلاسة
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // تفعيل Jetpack Compose هنا يا بطل
+    buildFeatures {
+        compose true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.11'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
 }
 
 dependencies {
-	implementation fileTree(dir: 'libs', include: ['*.jar'])
+    // مكتبات أندرويد الأساسية
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    
+    // مكتبات Jetpack Compose (قلب التطبيق الجديد)
+    implementation platform('androidx.compose:compose-bom:2024.02.01')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.activity:activity-compose:1.8.2'
+
+    // دعم ملفات الـ JAR القديمة إذا كنت لا تزال تحتاجها
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
 }
