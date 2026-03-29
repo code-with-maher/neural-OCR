@@ -1,0 +1,31 @@
+name: Setup Gradle Wrapper
+
+on:
+  workflow_dispatch: # يتم تشغيله يدوياً من صفحة Actions في جيت هاب
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # لإعطاء الصلاحية للأكشن لإضافة ملفات لمستودعك
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Generate Gradle Wrapper
+        run: |
+          # هذا الأمر سيقوم بتحميل Gradle وإنشاء ملفات الـ Wrapper (بما فيها الـ .jar والـ gradlew)
+          gradle wrapper --gradle-version 8.4
+
+      - name: Commit and Push Wrapper Files
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Setup: Added Gradle Wrapper files (.jar, scripts, and properties)"
+          file_pattern: 'gradlew gradlew.bat gradle/wrapper/*'
