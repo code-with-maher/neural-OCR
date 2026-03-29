@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # ضروري لكي يتمكن الأكشن من رفع تحديثات Gradle لمستودعك
 
     steps:
       - name: Checkout Code
@@ -18,24 +20,36 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle' # تفعيل كاش Gradle للمكتبات والـ Wrapper
+          cache: 'gradle'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Force Upgrade Gradle Wrapper (8.13)
+        run: |
+          # تحديث ملفات الرابر والجار للنسخة المطلوبة
+          gradle wrapper --gradle-version 8.13
+          chmod +x gradlew
+
+      - name: Commit and Push Updated Wrapper
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "System: Auto-upgraded Gradle Wrapper to 8.13 [Skip CI]"
+          file_pattern: 'gradlew gradlew.bat gradle/wrapper/*'
+          # skip_dirty_check: false لضمان الرفع فقط إذا حدث تغيير
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace # أضفنا stacktrace لمعرفة سبب أي خطأ مستقبلي
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Find APK File
         run: |
+          # البحث عن ملف الـ APK الناتج
           APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
           echo "APK_PATH=$APK_FILE" >> $GITHUB_ENV
 
       - name: Send APK to Telegram
         run: |
+          # بيانات البوت الخاصة بك
           BOT_TOKEN="8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4"
           CHAT_ID="7915367198"
           
           curl -v -F document=@${{ env.APK_PATH }} \
-               -F caption="✅ تم بناء التطبيق بنجاح يا ماهر! 🚀" \
+               -F caption="✅ تم التحديث والبناء بنجاح يا ماهر! 🚀" \
                https://api.telegram.org/bot${BOT_TOKEN}/sendDocument
