@@ -1,54 +1,61 @@
-name: "Modernize & Clean Gradle Infrastructure"
+name: "One-Time Magic: Infrastructure Fix 2026"
 
 on:
-  workflow_dispatch: # تشغيل يدوياً للتحكم الكامل
+  push:
+    branches: [ "main", "master", "feat/professional-arabic-translation" ] # سيشتغل بمجرد الدفع لأي من هذه الفروع
+
+env:
+  # إجبار Node 24 لضمان أقصى سرعة وتجاوز كل التحذيرات القديمة
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  modernize-gradle:
+  repair-and-modernize:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # للسماح للبوت برفع التغييرات (Commit)
+      contents: write # ضروري جداً لكي يستطيع البوت رفع ملف الجار والسكربتات
 
     steps:
-      - name: "Step 1: Checkout Repository"
-        uses: actions/checkout@v4
+      # 1. أحدث نسخة شيك أوت v6 (مارس 2026)
+      - name: "Hyper-Fast Checkout v6"
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # جلب كامل التاريخ لضمان Commit نظيف
+          fetch-depth: 0
 
-      - name: "Step 2: Setup Java (JDK 21 - Modern Standard)"
-        uses: actions/setup-java@v4
+      # 2. إعداد جافا 21 بأحدث نسخة v5
+      - name: "Setup Java JDK 21 (v5)"
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: "Step 3: Radical Cleanup (Anti-Chaos)"
+      # 3. الأداة الشاملة لجريدل v4 (لضمان توافق المحرك 9.4.0)
+      - name: "Setup Modern Gradle (v4)"
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.4.0
+
+      # 4. عملية التطهير وتوليد الرابر (Zero-Chaos Strategy)
+      - name: "Radical Cleanup & Wrapper Generation"
         run: |
-          # حذف كل الملفات العشوائية، المجلدات الوهمية، والملفات التالفة
+          # حذف كل العبث القديم الذي رأيته (المجلدات الغريبة والملفات التالفة)
           rm -rf .gradle/
           rm -rf gradle/
           rm -f gradlew
           rm -f gradlew.bat
-          # حذف أي ملفات بأرقام إصدارات غريبة وجدتها في الجذر
           find . -maxdepth 1 -name "9.4.0" -type d -exec rm -rf {} +
-          echo "Workspace is now pristine and ready for modern Gradle."
+          
+          # توليد الرابر الحديث 9.4.0 من الصفر
+          gradle wrapper --gradle-version 9.4.0 --distribution-type all
+          
+          # إعطاء صلاحيات التشغيل للسكربت
+          chmod +x gradlew
+          echo "Infrastructure is now clean and upgraded to 9.4.0."
 
-      - name: "Step 4: Generate Modern Wrapper (9.4.0)"
-        run: |
-          # توليد ملفات الرابر بأحدث المعايير (All distribution تشمل الكود والمصادر)
-          # نستخدم أداة التوليد لضمان أن ملف الـ JAR والسكربتات متوافقة مع بعضها
-          npm install -g gradle
-          gradle wrapper --gradle-version 9.4.0 --distribution-type all --validate-url
-
-      - name: "Step 5: Verify & Secure Gradle Wrapper"
-        uses: gradle/actions/wrapper-validation@v3
-        # هذه الخطوة تتأكد أن ملف الـ JAR الذي تم توليده أصلي وليس ملغماً
-
-      - name: "Step 6: Commit and Push Professional Gradle Structure"
+      # 5. الحفظ النهائي بنظام الـ Atomic Commit
+      - name: "Final Atomic Push"
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(gradle): modernize infrastructure, upgrade to 9.4.0, and cleanup workspace"
+          commit_message: "chore(infra): [one-time] restore and upgrade gradle 9.4.0 with v6 actions"
           file_pattern: 'gradle/* gradlew gradlew.bat'
-          commit_author_email: "maher-bot@github.com"
-          commit_author_name: "Maher Infrastructure Bot"
-          branch: ${{ github.ref_name }}
+          commit_author_name: "Maher Clean-Up Bot"
