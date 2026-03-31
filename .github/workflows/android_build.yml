@@ -1,29 +1,28 @@
-name: "Build Android APK (Ultra-Pro 2026)"
+name: "Build Android Release (Size Test 2026)"
 
-# جعلته يعمل يدوياً فقط كما طلبت (لن يعمل عند الدفع تلقائياً)
+# تشغيل يدوي فقط للتحكم في استهلاك الموارد
 on:
   workflow_dispatch:
 
 env:
-  # إجبار Node 24 لضمان أقصى سرعة وتوافق مع معايير مارس 2026
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # الرموز الحساسة (مؤقتاً كما طلبت)
+  # الرموز الحساسة (مؤقتاً كما طلبت يا ماهر)
   TELEGRAM_TOKEN: 8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4
   TELEGRAM_CHAT_ID: 7915367198
 
 jobs:
-  build:
-    name: Build APK
+  build-release:
+    name: Build Release APK
     runs-on: ubuntu-latest
 
     steps:
-      # 1. أحدث نسخة شيك أوت v6 (مارس 2026)
+      # 1. أحدث نسخة شيك أوت v6 لمارس 2026
       - name: "Hyper-Fast Checkout v6"
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1 # جلب النسخة الأخيرة فقط لسرعة البناء
+          fetch-depth: 1 
 
-      # 2. تحديث JDK إلى نسخة 21 (المعيار الاحترافي الجديد لأندرويد)
+      # 2. إعداد جافا 21 (المعيار لـ API 36)
       - name: "Setup Java JDK 21 (v5)"
         uses: actions/setup-java@v5
         with:
@@ -31,39 +30,41 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      # 3. إعداد أداة جريدل v4 (تضمن عمل المحرك 9.4.0 بكفاءة)
+      # 3. إعداد جريدل 9.4.1 (المحرك الأحدث)
       - name: "Setup Modern Gradle Tooling (v4)"
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 9.4.0
+          gradle-version: 9.4.1
 
       - name: "Grant Execute Permission"
         run: chmod +x ./gradlew
 
-      # 4. البناء بأحدث الأوامر ومعايير السرعة
-      - name: "Build Debug APK"
+      # 4. بناء نسخة الريليز (Release) لتفعيل الضغط وتصغير الحجم
+      - name: "Build Release APK (Minified)"
         id: build_apk
         run: |
           set -e
-          ./gradlew assembleDebug --stacktrace --console=plain | tee build_log.txt
+          # تشغيل أمر الريليز بدلاً من الديباج
+          ./gradlew assembleRelease --stacktrace --console=plain | tee build_log.txt
 
-      # 5. الإرسال لتليجرام (في حالة النجاح)
+      # 5. الإرسال لتليجرام (في حالة النجاح) - البحث في مسار Release
       - name: "Notify Telegram on Success"
         if: success()
         run: |
-          # البحث عن ملف الـ APK بدقة
-          APK_PATH=$(find ./app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          # البحث عن ملف الـ APK في مجلد الـ release
+          APK_PATH=$(find ./app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
           
-          # إرسال السجل والملف
+          # إرسال السجل والملف مع ذكر الحجم الجديد
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
             -F chat_id="$TELEGRAM_CHAT_ID" \
             -F document="@build_log.txt" \
-            -F caption="✅ Build succeeded! Gradle 9.4.0 Engine" > /dev/null
+            -F caption="✅ Release Build Succeeded! (API 36 Ready)" > /dev/null
             
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
             -F chat_id="$TELEGRAM_CHAT_ID" \
             -F document=@"$APK_PATH" \
-            -F caption="📦 Maher's App (Debug APK)" > /dev/null
+            -F caption="📦 Maher's App (Release APK) | Size: $APK_SIZE" > /dev/null
 
       # 6. الإرسال لتليجرام (في حالة الفشل)
       - name: "Notify Telegram on Failure"
@@ -72,4 +73,4 @@ jobs:
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
             -F chat_id="$TELEGRAM_CHAT_ID" \
             -F document="@build_log.txt" \
-            -F caption="❌ Build failed. Check the attached log for errors." > /dev/null
+            -F caption="❌ Release Build failed. Check R8/ProGuard logs!" > /dev/null
