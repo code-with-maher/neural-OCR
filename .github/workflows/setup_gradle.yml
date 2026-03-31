@@ -1,28 +1,54 @@
-name: Setup Gradle Wrapper
+name: "Modernize & Clean Gradle Infrastructure"
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # تشغيل يدوياً للتحكم الكامل
 
 jobs:
-  setup:
+  modernize-gradle:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # للسماح للبوت برفع التغييرات (Commit)
 
     steps:
-      - name: Checkout Code
+      - name: "Step 1: Checkout Repository"
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # جلب كامل التاريخ لضمان Commit نظيف
 
-      - name: Set up JDK 17
+      - name: "Step 2: Setup Java (JDK 21 - Modern Standard)"
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
+          cache: 'gradle'
 
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.4
+      - name: "Step 3: Radical Cleanup (Anti-Chaos)"
+        run: |
+          # حذف كل الملفات العشوائية، المجلدات الوهمية، والملفات التالفة
+          rm -rf .gradle/
+          rm -rf gradle/
+          rm -f gradlew
+          rm -f gradlew.bat
+          # حذف أي ملفات بأرقام إصدارات غريبة وجدتها في الجذر
+          find . -maxdepth 1 -name "9.4.0" -type d -exec rm -rf {} +
+          echo "Workspace is now pristine and ready for modern Gradle."
 
-      - name: Commit and Push
+      - name: "Step 4: Generate Modern Wrapper (9.4.0)"
+        run: |
+          # توليد ملفات الرابر بأحدث المعايير (All distribution تشمل الكود والمصادر)
+          # نستخدم أداة التوليد لضمان أن ملف الـ JAR والسكربتات متوافقة مع بعضها
+          npm install -g gradle
+          gradle wrapper --gradle-version 9.4.0 --distribution-type all --validate-url
+
+      - name: "Step 5: Verify & Secure Gradle Wrapper"
+        uses: gradle/actions/wrapper-validation@v3
+        # هذه الخطوة تتأكد أن ملف الـ JAR الذي تم توليده أصلي وليس ملغماً
+
+      - name: "Step 6: Commit and Push Professional Gradle Structure"
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Setup: Added Gradle Wrapper"
+          commit_message: "chore(gradle): modernize infrastructure, upgrade to 9.4.0, and cleanup workspace"
+          file_pattern: 'gradle/* gradlew gradlew.bat'
+          commit_author_email: "maher-bot@github.com"
+          commit_author_name: "Maher Infrastructure Bot"
+          branch: ${{ github.ref_name }}
