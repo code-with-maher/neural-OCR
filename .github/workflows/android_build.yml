@@ -1,56 +1,75 @@
-name: Build Android APK and Notify Telegram
+name: "Build Android APK (Ultra-Pro 2026)"
 
+# جعلته يعمل يدوياً فقط كما طلبت (لن يعمل عند الدفع تلقائياً)
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+
+env:
+  # إجبار Node 24 لضمان أقصى سرعة وتوافق مع معايير مارس 2026
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # الرموز الحساسة (مؤقتاً كما طلبت)
+  TELEGRAM_TOKEN: 8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4
+  TELEGRAM_CHAT_ID: 7915367198
 
 jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
 
-    env:
-      TELEGRAM_TOKEN: 8250432075:AAHpB8weBYy4_3XIhd7mCpC1hgnWI_lFTB4
-      TELEGRAM_CHAT_ID: 7915367198
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # 1. أحدث نسخة شيك أوت v6 (مارس 2026)
+      - name: "Hyper-Fast Checkout v6"
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1 # جلب النسخة الأخيرة فقط لسرعة البناء
 
-    - name: Setup JDK 17
-      uses: actions/setup-java@v3
-      with:
-        distribution: temurin
-        java-version: 17
+      # 2. تحديث JDK إلى نسخة 21 (المعيار الاحترافي الجديد لأندرويد)
+      - name: "Setup Java JDK 21 (v5)"
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
 
-    - name: Grant Gradle Execute Permission
-      run: chmod +x ./gradlew
+      # 3. إعداد أداة جريدل v4 (تضمن عمل المحرك 9.4.0 بكفاءة)
+      - name: "Setup Modern Gradle Tooling (v4)"
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.4.0
 
-    - name: Build APK
-      id: build_apk
-      run: |
-        set -e
-        ./gradlew assembleDebug --stacktrace --console=plain | tee build_log.txt
+      - name: "Grant Execute Permission"
+        run: chmod +x ./gradlew
 
-    - name: Send APK and Log to Telegram if Success
-      if: success()
-      run: |
-        APK_PATH=$(find ./app/build/outputs/apk/debug -name "*.apk" | head -n 1)
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
-          -F chat_id="$TELEGRAM_CHAT_ID" \
-          -F document="@build_log.txt" \
-          -F caption="✅ Build succeeded. APK attached." > /dev/null
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
-          -F chat_id="$TELEGRAM_CHAT_ID" \
-          -F document=@"$APK_PATH" \
-          -F caption="APK File" > /dev/null
+      # 4. البناء بأحدث الأوامر ومعايير السرعة
+      - name: "Build Debug APK"
+        id: build_apk
+        run: |
+          set -e
+          ./gradlew assembleDebug --stacktrace --console=plain | tee build_log.txt
 
-    - name: Send Log to Telegram if Failure
-      if: failure()
-      run: |
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
-          -F chat_id="$TELEGRAM_CHAT_ID" \
-          -F document="@build_log.txt" \
-          -F caption="❌ Build failed. See log attached." > /dev/null
+      # 5. الإرسال لتليجرام (في حالة النجاح)
+      - name: "Notify Telegram on Success"
+        if: success()
+        run: |
+          # البحث عن ملف الـ APK بدقة
+          APK_PATH=$(find ./app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          
+          # إرسال السجل والملف
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+            -F chat_id="$TELEGRAM_CHAT_ID" \
+            -F document="@build_log.txt" \
+            -F caption="✅ Build succeeded! Gradle 9.4.0 Engine" > /dev/null
+            
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+            -F chat_id="$TELEGRAM_CHAT_ID" \
+            -F document=@"$APK_PATH" \
+            -F caption="📦 Maher's App (Debug APK)" > /dev/null
+
+      # 6. الإرسال لتليجرام (في حالة الفشل)
+      - name: "Notify Telegram on Failure"
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+            -F chat_id="$TELEGRAM_CHAT_ID" \
+            -F document="@build_log.txt" \
+            -F caption="❌ Build failed. Check the attached log for errors." > /dev/null
