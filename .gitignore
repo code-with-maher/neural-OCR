@@ -1,0 +1,7 @@
+
+*.apk
+*.jks
+.gradle/
+app/build/
+build/
+captures/
