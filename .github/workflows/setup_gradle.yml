@@ -1,61 +1,45 @@
-name: "One-Time Magic: Infrastructure Fix 2026"
+name: "FINAL FIX: Write Wrapper to Disk"
 
 on:
-  push:
-    branches: [ "main", "master", "feat/professional-arabic-translation" ] # سيشتغل بمجرد الدفع لأي من هذه الفروع
+  workflow_dispatch:
 
 env:
-  # إجبار Node 24 لضمان أقصى سرعة وتجاوز كل التحذيرات القديمة
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  repair-and-modernize:
+  force-write:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # ضروري جداً لكي يستطيع البوت رفع ملف الجار والسكربتات
+      contents: write
 
     steps:
-      # 1. أحدث نسخة شيك أوت v6 (مارس 2026)
-      - name: "Hyper-Fast Checkout v6"
+      - name: "Checkout Code"
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
-      # 2. إعداد جافا 21 بأحدث نسخة v5
-      - name: "Setup Java JDK 21 (v5)"
+      - name: "Setup Java 21"
         uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: 'gradle'
 
-      # 3. الأداة الشاملة لجريدل v4 (لضمان توافق المحرك 9.4.0)
-      - name: "Setup Modern Gradle (v4)"
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 9.4.0
-
-      # 4. عملية التطهير وتوليد الرابر (Zero-Chaos Strategy)
-      - name: "Radical Cleanup & Wrapper Generation"
+      - name: "Force Generate Wrapper in Root"
         run: |
-          # حذف كل العبث القديم الذي رأيته (المجلدات الغريبة والملفات التالفة)
-          rm -rf .gradle/
-          rm -rf gradle/
-          rm -f gradlew
-          rm -f gradlew.bat
-          find . -maxdepth 1 -name "9.4.0" -type d -exec rm -rf {} +
+          # تنظيف حقيقي للمجلد الحالي
+          rm -rf gradle/ gradlew gradlew.bat
           
-          # توليد الرابر الحديث 9.4.0 من الصفر
-          gradle wrapper --gradle-version 9.4.0 --distribution-type all
+          # استخدام أمر النظام مباشرة لضمان الكتابة في المجلد الحالي (.)
+          npm install -g gradle
+          gradle wrapper --gradle-version 9.4.0 --distribution-type all --gradle-distribution-url https://services.gradle.org/distributions/gradle-9.4.0-all.zip
           
-          # إعطاء صلاحيات التشغيل للسكربت
-          chmod +x gradlew
-          echo "Infrastructure is now clean and upgraded to 9.4.0."
+          # التحقق البصري (سيظهر في الـ Logs)
+          echo "Checking if files exist in $(pwd):"
+          ls -la gradlew
+          ls -la gradle/wrapper/gradle-wrapper.jar
 
-      # 5. الحفظ النهائي بنظام الـ Atomic Commit
-      - name: "Final Atomic Push"
+      - name: "Commit and Push"
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(infra): [one-time] restore and upgrade gradle 9.4.0 with v6 actions"
+          commit_message: "chore(infra): [fixed] write gradle 9.4.0 wrapper to root"
           file_pattern: 'gradle/* gradlew gradlew.bat'
-          commit_author_name: "Maher Clean-Up Bot"
+          commit_user_name: "Maher Infrastructure Bot"
+          commit_user_email: "maher-bot@github.com"
