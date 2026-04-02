@@ -1,0 +1,50 @@
+name: "🚀 Pro Release Build & Telegram Dispatch"
+
+on:
+  workflow_dispatch: # تشغيل يدوي ليكون القرار بيدك دائماً
+
+jobs:
+  build:
+    name: "Build & Upload APK"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🛰️ Checkout Code (v6)
+        uses: actions/checkout@v6
+
+      - name: ☕ Setup Java 25 (LTS - Most Stable)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu' # نستخدم Zulu لأنها الأكثر توافقاً واستقراراً
+          java-version: '25'
+          cache: 'gradle' # كاش ذكي لتسريع البناء
+
+      - name: 🔨 Execute Build (Using Local Wrapper)
+        id: build_step
+        run: |
+          # نعتمد على ما حدثه الـ Dependabot في مستودعك
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+        # إذا فشل البناء، جيتهاب سيعرض الخطأ بالتفصيل في الـ Logs تلقائياً
+
+      - name: ✈️ Send APK to Telegram (URL-Query Style)
+        if: success() # لن يتم الإرسال إلا إذا نجح البناء تماماً
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # البحث عن الـ APK المخرج
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          
+          echo "📤 Dispatching APK to Telegram via URL query method..."
+          
+          # استجابة لطلبك: وضعنا الـ Chat ID في الرابط نفسه
+          # واستخدمنا curl لرفع الملف مع وضع الـ Caption
+          curl -v \
+            -F "document=@$APK_PATH" \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}&caption=✅ تم بناء نسخة ريليز بنجاح يا ماهر! خذها قبل أن تبرد."
+
+      - name: ⚠️ Error Notification (Actions Only)
+        if: failure()
+        run: |
+          echo "::error title=Build Failed::يا ماهر، هناك خطب ما في الكود! راجع سجلات Gradle أعلاه لتعرف أين وقعت المشكلة."
