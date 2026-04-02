@@ -19,11 +19,11 @@ jobs:
           java-version: '25'
           cache: 'gradle'
 
-      - name: 🔨 Execute Build (Using Local Wrapper)
+      - name: 🔨 Execute Build (Clean Logs)
         id: build_step
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon --info
+          ./gradlew assembleRelease --no-daemon --console=plain -w
 
       - name: ✈️ Send APK to Telegram (URL-Query Style)
         if: success()
@@ -39,4 +39,4 @@ jobs:
       - name: ⚠️ Error Notification (Actions Only)
         if: failure()
         run: |
-          echo "::error title=Build Failed::يا ماهر، البناء فشل. راجع سجلات الـ Info أعلاه."
+          echo "::error title=Build Failed::يا ماهر، البناء فشل. راجع السجلات أعلاه لترى الخطأ الصافي بدون إزعاج."
