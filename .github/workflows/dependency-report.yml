@@ -11,13 +11,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create labels
-        uses: actions-ecosystem/action-create-labels@v1
-        with:
-          labels: |
-            android
-            dependencies
-            gradle
-            wrapper
-            ci
-            github-actions
+      - name: Set up GitHub CLI
+        uses: cli/cli@v3
+
+      - name: Create labels using GitHub CLI
+        env:
+          GITHUB_TOKEN: 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
+        run: |
+          labels=("android" "dependencies" "gradle" "wrapper" "ci" "github-actions")
+          for label in "${labels[@]}"; do
+            gh label create "$label" --color "0e8a16" --description "Created by workflow" || echo "Label $label already exists"
+          done
