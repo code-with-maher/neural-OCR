@@ -1,7 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.a.labs">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- صلاحيات التطبيق -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
@@ -12,7 +10,6 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
 
-        <!-- النشاط الرئيسي -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
@@ -26,16 +23,10 @@
             </intent-filter>
         </activity>
 
-        <!-- نشاط التجريب أو الاختبار -->
         <activity
             android:name=".DebugActivity"
             android:screenOrientation="portrait"
             android:theme="@style/AppTheme.DebugActivity" />
-
-        <!-- مكتبة HTTP القديمة (اختياري، يمكن إزالتها إذا لا تستخدمها) -->
-        <uses-library
-            android:name="org.apache.http.legacy"
-            android:required="false" />
 
     </application>
 
