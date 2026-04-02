@@ -1,20 +1,61 @@
 version: 2
 
 updates:
+  # تحديث Gradle ecosystem بالكامل
   - package-ecosystem: "gradle"
     directory: "/"
+
     schedule:
-      interval: "daily"
-    open-pull-requests-limit: 10
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "Europe/Amsterdam"
+
+    open-pull-requests-limit: 1
+
     labels:
       - "dependencies"
       - "android"
+      - "gradle"
+      - "wrapper"
+
     commit-message:
       prefix: "deps"
+      include: "scope"
+
+    rebase-strategy: "auto"
+
     groups:
-      android-core:
+      all-gradle-updates:
         patterns:
-          - "com.android.*"
-          - "androidx.*"
-          - "org.jetbrains.kotlin*"
-          - "com.google.*"
+          - "*"
+
+    reviewers:
+      - "code-with-maher"
+
+  # تحديث GitHub Actions والـ runner actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:10"
+      timezone: "Europe/Amsterdam"
+
+    open-pull-requests-limit: 1
+
+    labels:
+      - "ci"
+      - "github-actions"
+
+    commit-message:
+      prefix: "ci"
+
+    groups:
+      all-actions-updates:
+        patterns:
+          - "*"
+
+    reviewers:
+      - "code-with-maher"
