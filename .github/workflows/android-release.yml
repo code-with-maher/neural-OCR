@@ -25,11 +25,12 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --console=plain -w
 
-      - name: ✈️ Send APK to Telegram (Standard Multipart)
+      - name: ✈️ Send APK to Telegram (Final Industrial Fix)
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CAPTION: "✅ تم بناء نسخة ريليز بنجاح يا ماهر! خذها قبل أن تبرد."
         run: |
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           
@@ -38,8 +39,8 @@ jobs:
             exit 1
           fi
 
-          curl -v \
-            -F "chat_id=${CHAT_ID}" \
-            -F "document=@${APK_PATH}" \
-            -F "caption=✅ تم بناء نسخة ريليز بنجاح يا ماهر! خذها قبل أن تبرد." \
-            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
+          # استخدام curl مع تمرير المتغيرات بشكل آمن تماماً عبر الـ Form
+          curl -s -v -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+            -F chat_id="${CHAT_ID}" \
+            -F document=@"${APK_PATH}" \
+            -F caption="${CAPTION}"
