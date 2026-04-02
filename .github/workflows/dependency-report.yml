@@ -1,8 +1,34 @@
-- name: Create labels using GH CLI
+name: Setup Custom Issue Labels
+
+on:
+  workflow_dispatch: # وضعته لك لكي تشغله يدوياً متى ما كان مزاجك رايقاً بضغطة زر
+
+permissions:
+  issues: write # إعطاء الصلاحية للـ workflow لإنشاء التصنيفات
+
+jobs:
+  create-rebellious-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Create 6 Awesome Labels using GitHub CLI
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_OVERRIDE }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # جيتهاب توفره لك تلقائياً، لا تتعب نفسك بإضافته كسر
         run: |
-          labels=("android" "dependencies" "gradle" "wrapper" "ci" "github-actions")
-          for label in "${labels[@]}"; do
-            gh label create "$label" --color "0e8a16" --description "Created by workflow" || echo "Label $label already exists"
+          # قائمة بتصنيفاتك الستة مع ألوان متناسقة تليق بالمستودع
+          declare -A LABELS=(
+            ["android"]="3DDC84"
+            ["dependencies"]="0366d6"
+            ["gradle"]="02303A"
+            ["wrapper"]="E4E669"
+            ["ci"]="207de5"
+            ["github-actions"]="24292e"
+          )
+          
+          echo "🔥 Starting to inject Maher's labels into the repository..."
+          
+          for label in "${!LABELS[@]}"; do
+            # نستخدم الأمر gh الرسمي. 
+            # وضعنا || true حتى لو كان التصنيف موجوداً مسبقاً، لا يتعطل الأكشن ويزعجك برسائل الخطأ!
+            gh label create "$label" --color "${LABELS[$label]}" --force || true
+            echo "✅ Label '$label' is locked and loaded!"
           done
