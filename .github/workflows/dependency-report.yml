@@ -1,26 +1,6 @@
-name: Create Labels Manually
-
-on:
-  workflow_dispatch:
-
-jobs:
-  create-labels:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install GitHub CLI
-        run: |
-          sudo apt update
-          sudo apt install gh -y
-
-      - name: Authenticate GH CLI
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN_OVERRIDE }}" | gh auth login --with-token
-
-      - name: Create labels using GitHub CLI
+- name: Create labels using GH CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_OVERRIDE }}
         run: |
           labels=("android" "dependencies" "gradle" "wrapper" "ci" "github-actions")
           for label in "${labels[@]}"; do
