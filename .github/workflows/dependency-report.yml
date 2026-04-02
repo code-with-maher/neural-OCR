@@ -1,20 +1,24 @@
-name: Setup Custom Issue Labels
+name: "Modern Label Factory 🚀"
 
 on:
-  workflow_dispatch: # وضعته لك لكي تشغله يدوياً متى ما كان مزاجك رايقاً بضغطة زر
+  workflow_dispatch: # تشغيل يدوي بضغطة زر عندما تقرر ذلك
 
 permissions:
-  issues: write # إعطاء الصلاحية للـ workflow لإنشاء التصنيفات
+  issues: write # تصريح حيوي لكي يتمكن الأكشن من تعديل التصنيفات
 
 jobs:
-  create-rebellious-labels:
+  label-injection:
     runs-on: ubuntu-latest
     steps:
-      - name: 🚀 Create 6 Awesome Labels using GitHub CLI
+      # العودة من العصر الحجري إلى المستقبل بطلبك
+      - name: 🛰️ Checkout Repository (Cutting Edge)
+        uses: actions/checkout@v6
+
+      - name: 🎨 Build & Sync Professional Labels
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # جيتهاب توفره لك تلقائياً، لا تتعب نفسك بإضافته كسر
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # قائمة بتصنيفاتك الستة مع ألوان متناسقة تليق بالمستودع
+          # تعريف المصفوفة بالتصنيفات الستة التي طلبتها مع ألوان "مودرن"
           declare -A LABELS=(
             ["android"]="3DDC84"
             ["dependencies"]="0366d6"
@@ -23,12 +27,23 @@ jobs:
             ["ci"]="207de5"
             ["github-actions"]="24292e"
           )
+
+          echo "🚀 Starting the professional workflow for Maher..."
           
-          echo "🔥 Starting to inject Maher's labels into the repository..."
-          
+          # الحصول على اسم المستودع الحالي تلقائياً
+          REPO=${{ github.repository }}
+
           for label in "${!LABELS[@]}"; do
-            # نستخدم الأمر gh الرسمي. 
-            # وضعنا || true حتى لو كان التصنيف موجوداً مسبقاً، لا يتعطل الأكشن ويزعجك برسائل الخطأ!
-            gh label create "$label" --color "${LABELS[$label]}" --force || true
-            echo "✅ Label '$label' is locked and loaded!"
+            echo "Checking label: $label"
+            
+            # محاولة إنشاء الليبل، وفي حال وجوده نقوم بتحديث لونه فقط لضمان الدقة
+            if gh label list --repo "$REPO" | grep -q "^$label[[:space:]]"; then
+              echo "🔄 Label '$label' exists, updating color..."
+              gh label edit "$label" --color "${LABELS[$label]}" --repo "$REPO"
+            else
+              echo "✨ Creating new label: '$label'"
+              gh label create "$label" --color "${LABELS[$label]}" --repo "$REPO"
+            end
           done
+
+          echo "✅ Mission Accomplished. Your repository is now organized!"
