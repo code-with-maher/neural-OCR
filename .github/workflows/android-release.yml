@@ -25,18 +25,21 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --console=plain -w
 
-      - name: ✈️ Send APK to Telegram (URL-Query Style)
+      - name: ✈️ Send APK to Telegram (Standard Multipart)
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          curl -v \
-            -F "document=@$APK_PATH" \
-            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}&caption=✅ تم بناء نسخة ريليز بنجاح يا ماهر!"
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::APK file not found!"
+            exit 1
+          fi
 
-      - name: ⚠️ Error Notification (Actions Only)
-        if: failure()
-        run: |
-          echo "::error title=Build Failed::يا ماهر، البناء فشل. راجع السجلات أعلاه لترى الخطأ الصافي بدون إزعاج."
+          curl -v \
+            -F "chat_id=${CHAT_ID}" \
+            -F "document=@${APK_PATH}" \
+            -F "caption=✅ تم بناء نسخة ريليز بنجاح يا ماهر! خذها قبل أن تبرد." \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
