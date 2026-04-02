@@ -32,7 +32,7 @@ jobs:
 
       # 3. إعداد جريدل 9.4.1 (المحرك الأحدث)
       - name: "Setup Modern Gradle Tooling (v4)"
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: 9.4.1
 

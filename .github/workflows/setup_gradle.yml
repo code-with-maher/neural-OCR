@@ -50,7 +50,7 @@ jobs:
           echo "Purge complete. Repository is now clean and 9.4.1 ready."
 
       - name: "Commit Clean Infrastructure"
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore(infra): [PURGE] remove .gradle and build folders, upgrade 9.4.1"
           file_pattern: 'gradle/* gradlew gradlew.bat .gitignore'
