@@ -1,35 +1,53 @@
 [versions]
 agp = "8.7.0"
 kotlin = "2.1.10"
+
 compileSdk = "36"
 minSdk = "28"
 targetSdk = "36"
 
+# Compose
 composeBom = "2026.03.00"
 composeCompiler = "1.5.15"
 activityCompose = "1.10.0"
 
-lifecycle = "2.8.0"
+# AndroidX / Core
 coreKtx = "1.15.0"
 appcompat = "1.7.0"
+lifecycle = "2.8.0"
+
+# UI / Material
 material = "1.13.0"
+
+# Networking
 okhttp = "4.12.0"
 
 [libraries]
+# Core
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
-google-material = { module = "com.google.android.material:material", version.ref = "material" }
-okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 
-androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+# Material Design (Views)
+google-material = { module = "com.google.android.material:material", version.ref = "material" }
 
+# Networking
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+
+# Compose BOM
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+
+# Compose modules (versions managed by BOM)
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-compose-foundation = { module = "androidx.compose.foundation:foundation" }
+androidx-compose-runtime = { module = "androidx.compose.runtime:runtime" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
