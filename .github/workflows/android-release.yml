@@ -25,7 +25,7 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --console=plain -w
 
-      - name: ✈️ Send APK to Telegram (Final Industrial Fix)
+      - name: ✈️ Send APK to Telegram (Python Reliable Shield)
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -39,8 +39,23 @@ jobs:
             exit 1
           fi
 
-          # استخدام curl مع تمرير المتغيرات بشكل آمن تماماً عبر الـ Form
-          curl -s -v -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
-            -F chat_id="${CHAT_ID}" \
-            -F document=@"${APK_PATH}" \
-            -F caption="${CAPTION}"
+          # استخدام بايثون لإرسال الملف لضمان معالجة الحروف والروابط بدقة 100%
+          python3 -c "
+          import requests, os
+          
+          bot_token = os.getenv('BOT_TOKEN').strip()
+          chat_id = os.getenv('CHAT_ID').strip()
+          caption = os.getenv('CAPTION')
+          file_path = '$APK_PATH'
+          
+          url = f'https://api.telegram.org/bot{bot_token}/sendDocument'
+          
+          with open(file_path, 'rb') as f:
+              response = requests.post(url, data={'chat_id': chat_id, 'caption': caption}, files={'document': f})
+          
+          if response.status_code == 200:
+              print('✅ Sent Successfully to Telegram!')
+          else:
+              print(f'❌ Error: {response.status_code} - {response.text}')
+              exit(1)
+          "
