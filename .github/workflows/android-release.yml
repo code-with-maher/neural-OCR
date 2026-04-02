@@ -13,7 +13,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: ☕ Setup Java 25 (LTS - Most Stable)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'zulu' # نستخدم Zulu لأنها الأكثر توافقاً واستقراراً
           java-version: '25'
