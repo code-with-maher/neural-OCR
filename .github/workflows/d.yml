@@ -1,0 +1,36 @@
+name: "🧪 Telegram Connection Test"
+
+on: [push]
+
+jobs:
+  test_connection:
+    name: "Send Test Message"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛰️ Checkout Code
+        uses: actions/checkout@v6
+
+      - name: 🐍 Send Text via Python (Safe Mode)
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 -c "
+          import requests, os
+          
+          # تنظيف المتغيرات من أي مسافات زائدة قد تسبب خطأ URL
+          bot_token = os.getenv('BOT_TOKEN').strip()
+          chat_id = os.getenv('CHAT_ID').strip()
+          message = '🚀 اختبار ناجح! الاتصال مستقر يا ماهر والـ Secrets سليمة.'
+          
+          url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+          
+          response = requests.post(url, data={'chat_id': chat_id, 'text': message})
+          
+          if response.status_code == 200:
+              print('✅ Test message sent successfully!')
+          else:
+              print(f'❌ Error: {response.status_code} - {response.text}')
+              exit(1)
+          "
