@@ -11,12 +11,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up GitHub CLI
-        uses: cli/cli@v3
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install gh -y
+
+      - name: Authenticate GH CLI
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN_OVERRIDE }}" | gh auth login --with-token
 
       - name: Create labels using GitHub CLI
-        env:
-          GITHUB_TOKEN: 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
         run: |
           labels=("android" "dependencies" "gradle" "wrapper" "ci" "github-actions")
           for label in "${labels[@]}"; do
