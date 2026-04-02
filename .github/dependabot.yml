@@ -1,0 +1,20 @@
+version: 2
+
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "android"
+    commit-message:
+      prefix: "deps"
+    groups:
+      android-core:
+        patterns:
+          - "com.android.*"
+          - "androidx.*"
+          - "org.jetbrains.kotlin*"
+          - "com.google.*"
