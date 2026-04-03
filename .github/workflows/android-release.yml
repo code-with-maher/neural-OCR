@@ -12,7 +12,7 @@ jobs:
       - name: 🛰️ Checkout Code (v6)
         uses: actions/checkout@v6
 
-      - name: ☕ Setup Java 25 (LTS - Most Stable)
+      - name: ☕ Setup Java 25 (LTS)
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
@@ -20,42 +20,17 @@ jobs:
           cache: 'gradle'
 
       - name: 🔨 Execute Build (Clean Logs)
-        id: build_step
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --console=plain -w
 
-      - name: ✈️ Send APK to Telegram (Python Reliable Shield)
+      - name: ✈️ Notify Telegram
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          CAPTION: "✅ تم بناء نسخة ريليز بنجاح يا ماهر! خذها قبل أن تبرد."
         run: |
-          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          
-          if [ -z "$APK_PATH" ]; then
-            echo "::error::APK file not found!"
-            exit 1
-          fi
-
-          # استخدام بايثون لإرسال الملف لضمان معالجة الحروف والروابط بدقة 100%
-          python3 -c "
-          import requests, os
-          
-          bot_token = os.getenv('BOT_TOKEN').strip()
-          chat_id = os.getenv('CHAT_ID').strip()
-          caption = os.getenv('CAPTION')
-          file_path = '$APK_PATH'
-          
-          url = f'https://api.telegram.org/bot{bot_token}/sendDocument'
-          
-          with open(file_path, 'rb') as f:
-              response = requests.post(url, data={'chat_id': chat_id, 'caption': caption}, files={'document': f})
-          
-          if response.status_code == 200:
-              print('✅ Sent Successfully to Telegram!')
-          else:
-              print(f'❌ Error: {response.status_code} - {response.text}')
-              exit(1)
-          "
+          # تثبيت مكتبة requests إذا لم تكن موجودة (احتياطاً)
+          pip install requests
+          # تشغيل السكربت العبقري
+          python3 notify_telegram.py
