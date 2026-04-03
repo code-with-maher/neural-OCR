@@ -3,10 +3,9 @@ updates:
   - package-ecosystem: "gradle"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:00"
-      timezone: "Europe/Amsterdam"
+      interval: "daily"
+      time: "10:00"
+      timezone: "Asia/Riyadh"
     open-pull-requests-limit: 3
     commit-message:
       prefix: "deps"
@@ -22,10 +21,9 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:10"
-      timezone: "Europe/Amsterdam"
+      interval: "daily"
+      time: "10:10"
+      timezone: "Asia/Riyadh"
     open-pull-requests-limit: 3
     commit-message:
       prefix: "ci"
