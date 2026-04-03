@@ -1,0 +1,32 @@
+name: "🔍 Pull Request Quality Guard"
+
+on:
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  check-quality:
+    name: "Validate Changes"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛰️ Checkout Code
+        uses: actions/checkout@v6
+
+      - name: ☕ Setup Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+          cache: 'gradle'
+
+      - name: 🔨 Validate Build & Tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew check --no-daemon --console=plain
+
+      - name: 📊 Check APK Size Impact
+        run: |
+          ./gradlew assembleRelease --no-daemon --console=plain
+          APK_SIZE=$(du -sh app/build/outputs/apk/release/*.apk | cut -f1)
+          echo "::notice title=APK Size Check::حجم الـ APK المتوقع بعد هذا التحديث هو: $APK_SIZE"
