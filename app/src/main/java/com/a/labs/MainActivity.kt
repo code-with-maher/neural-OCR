@@ -4,21 +4,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 
-// 1. تعريف مسارات التطبيق (Routes) بشكل آمن لمنع الأخطاء الإملائية
+// تعريف مسارات التطبيق
 sealed class Screen(val route: String) {
     object Library : Screen("library_screen")
     object Settings : Screen("settings_screen")
-    // مسار القراءة يأخذ "معرف الكتاب" كمتغير لكي يعرف أي كتاب يفتح
     object Reader : Screen("reader_screen/{bookId}") {
         fun createRoute(bookId: String) = "reader_screen/$bookId"
     }
@@ -27,18 +26,14 @@ sealed class Screen(val route: String) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // تفعيل واجهة الحافة للحافة (Edge-to-Edge) ليكون التطبيق عصرياً ويغطي الشاشة بالكامل
-        enableEdgeToEdge() 
-        
+        enableEdgeToEdge()
+
         setContent {
-            // استخدام ثيم الماتيريال 3 (Material 3) كأساس
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // استدعاء نظام الملاحة والتنقل
                     MainAppNavigation()
                 }
             }
@@ -46,32 +41,38 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// 2. محرك التنقل المركزي (The Navigator)
 @Composable
 fun MainAppNavigation() {
-    // المتحكم الرئيسي في التنقل (يحفظ الـ Backstack تلقائياً)
     val navController = rememberNavController()
 
     NavHost(
         navController = navController,
-        startDestination = Screen.Library.route // شاشة البداية هي المكتبة كما طلبت
+        startDestination = Screen.Library.route
     ) {
-        // شاشة المكتبة
+        // شاشة المكتبة تحتوي زر ينقلك لشاشة الإعدادات الجاهزة بالكومبوز
         composable(Screen.Library.route) {
-            // سنقوم بإنشاء هذا الملف لاحقاً
-            // LibraryScreen(navController = navController)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("اضغط الزر للذهاب لشاشة الإعدادات")
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { navController.navigate(Screen.Settings.route) }) {
+                    Text("اذهب لشاشة الإعدادات")
+                }
+            }
         }
 
-        // شاشة الإعدادات
+        // شاشة الإعدادات الموجودة فعلاً (الكومبوز الجاهزة)
         composable(Screen.Settings.route) {
-            // سنقوم بإنشاء هذا الملف لاحقاً
-            // SettingsScreen(navController = navController)
+            SettingsScreen(navController)
         }
 
-        // شاشة القراءة (تستقبل معرف الكتاب الذي تم الضغط عليه)
+        // شاشة القراءة تبقى معلقة
         composable(Screen.Reader.route) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getString("bookId") ?: ""
-            // سنقوم بإنشاء هذا الملف لاحقاً
             // ReaderScreen(navController = navController, bookId = bookId)
         }
     }
