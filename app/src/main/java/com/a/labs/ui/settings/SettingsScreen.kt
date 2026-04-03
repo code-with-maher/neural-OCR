@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.a.labs.data.local.SettingsManager
+import com.a.labs.core.GeminiModels
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -27,8 +28,11 @@ fun SettingsScreen(navController: NavHostController) {
     val geminiKey by settingsManager.geminiKey.collectAsState(initial = "")
     val elevenKey by settingsManager.elevenKey.collectAsState(initial = "")
     val selectedEngine by settingsManager.ttsEngine.collectAsState(initial = "SYSTEM")
+    val selectedGeminiModel by settingsManager.geminiModel.collectAsState(initial = GeminiModels.FLASH_2_5)
 
-    var expanded by remember { mutableStateOf(false) }
+    var engineExpanded by remember { mutableStateOf(false) }
+    var modelExpanded by remember { mutableStateOf(false) }
+    
     val engines = listOf("Gemini 2.5 Flash TTS", "ElevenLabs", "System Engine")
 
     Scaffold(
@@ -65,7 +69,7 @@ fun SettingsScreen(navController: NavHostController) {
             OutlinedTextField(
                 value = elevenKey,
                 onValueChange = { scope.launch { settingsManager.saveSetting(SettingsManager.ELEVEN_KEY, it) } },
-                label = { Text("ElevenLabs API Key (اختياري)") },
+                label = { Text("ElevenLabs API Key") },
                 modifier = Modifier.fillMaxWidth(),
                 leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
                 singleLine = true
@@ -73,30 +77,58 @@ fun SettingsScreen(navController: NavHostController) {
 
             HorizontalDivider()
 
-            Text("محرك النطق", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text("إعدادات الذكاء الاصطناعي", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
 
             ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = !expanded }
+                expanded = modelExpanded,
+                onExpandedChange = { modelExpanded = !modelExpanded }
+            ) {
+                OutlinedTextField(
+                    value = selectedGeminiModel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("نموذج Gemini المستهدف") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = modelExpanded,
+                    onDismissRequest = { modelExpanded = false }
+                ) {
+                    GeminiModels.availableModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model) },
+                            onClick = {
+                                scope.launch { settingsManager.saveSetting(SettingsManager.GEMINI_MODEL_KEY, model) }
+                                modelExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            ExposedDropdownMenuBox(
+                expanded = engineExpanded,
+                onExpandedChange = { engineExpanded = !engineExpanded }
             ) {
                 OutlinedTextField(
                     value = selectedEngine,
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("اختر المحرك") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    label = { Text("محرك النطق (TTS)") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = engineExpanded) },
                     modifier = Modifier.menuAnchor().fillMaxWidth()
                 )
                 ExposedDropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false }
+                    expanded = engineExpanded,
+                    onDismissRequest = { engineExpanded = false }
                 ) {
                     engines.forEach { engine ->
                         DropdownMenuItem(
                             text = { Text(engine) },
                             onClick = {
                                 scope.launch { settingsManager.saveSetting(SettingsManager.TTS_ENGINE, engine) }
-                                expanded = false
+                                engineExpanded = false
                             }
                         )
                     }
@@ -104,16 +136,6 @@ fun SettingsScreen(navController: NavHostController) {
             }
 
             HorizontalDivider()
-
-            Button(
-                onClick = { /* التحقق من التحديثات */ },
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(12.dp)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("التحقق من وجود تحديثات")
-            }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -124,16 +146,10 @@ fun SettingsScreen(navController: NavHostController) {
                     Spacer(Modifier.height(8.dp))
                     Text("الإصدار: 1.0.0-Alpha", fontSize = 14.sp)
                     Text(
-                        "هذا التطبيق مخصص لمساعدة ذوي الاحتياجات الخاصة على قراءه الكتب والوصول للمحتوى الصوتي بسهولة.",
+                        "مشروع قراءة الكتب والتعرف البصري المدعوم بالذكاء الاصطناعي.",
                         fontSize = 13.sp,
                         lineHeight = 18.sp
                     )
-                    Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { /* فتح رابط التليجرام */ }, modifier = Modifier.align(Alignment.End)) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("انضم لقناتنا على تليجرام")
-                    }
                 }
             }
         }
