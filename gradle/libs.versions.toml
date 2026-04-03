@@ -4,13 +4,13 @@ kotlin = "2.3.20"
 compileSdk = "36"
 minSdk = "28"
 targetSdk = "36"
-composeBom = "2026.03.00"
+composeBom = "2026.03.01"
 coreKtx = "1.18.0"
 lifecycle = "2.10.0"
 okhttp = "5.3.2"
-navigation = "2.8.5"
-datastore = "1.1.1"
-gson = "2.11.0"
+navigation = "2.9.7"
+datastore = "1.2.1"
+gson = "2.13.2"
 
 [libraries]
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
