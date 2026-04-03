@@ -9,18 +9,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.a.labs.ui.settings.SettingsScreen  // استيراد شاشة الإعدادات
 
-// تعريف مسارات التطبيق
+// مسارات التطبيق
 sealed class Screen(val route: String) {
-    object Library : Screen("library_screen")
+    object Home : Screen("home_screen")
     object Settings : Screen("settings_screen")
-    object Reader : Screen("reader_screen/{bookId}") {
-        fun createRoute(bookId: String) = "reader_screen/$bookId"
-    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -34,7 +31,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainAppNavigation()
+                    AppNavigation()
                 }
             }
         }
@@ -42,22 +39,22 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainAppNavigation() {
+fun AppNavigation() {
     val navController = rememberNavController()
 
     NavHost(
         navController = navController,
-        startDestination = Screen.Library.route
+        startDestination = Screen.Home.route
     ) {
-        // شاشة المكتبة تحتوي زر ينقلك لشاشة الإعدادات الجاهزة بالكومبوز
-        composable(Screen.Library.route) {
+        // الشاشة الرئيسية
+        composable(Screen.Home.route) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("اضغط الزر للذهاب لشاشة الإعدادات")
+                Text("التطبيق يعمل بنجاح")
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = { navController.navigate(Screen.Settings.route) }) {
                     Text("اذهب لشاشة الإعدادات")
@@ -65,15 +62,9 @@ fun MainAppNavigation() {
             }
         }
 
-        // شاشة الإعدادات الموجودة فعلاً (الكومبوز الجاهزة)
+        // شاشة الإعدادات الجاهزة
         composable(Screen.Settings.route) {
             SettingsScreen(navController)
-        }
-
-        // شاشة القراءة تبقى معلقة
-        composable(Screen.Reader.route) { backStackEntry ->
-            val bookId = backStackEntry.arguments?.getString("bookId") ?: ""
-            // ReaderScreen(navController = navController, bookId = bookId)
         }
     }
 }
