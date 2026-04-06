@@ -12,16 +12,18 @@ jobs:
       - name: 🛰️ Checkout Code (v6)
         uses: actions/checkout@v6
 
-      - name: ☕ Setup Java 25 (LTS)
+      - name: ☕ Setup Java 21 (LTS - Stability First)
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
-          java-version: '25'
+          java-version: '21' # عدنا للأمان يا صديقي
           cache: 'gradle'
 
       - name: 🔨 Execute Build (Clean Logs)
         run: |
           chmod +x ./gradlew
+          # تنظيف الكاش القديم لضمان عدم تداخل مخلفات جافا 25
+          ./gradlew clean 
           ./gradlew assembleRelease --no-daemon --console=plain -w
 
       - name: ✈️ Notify Telegram
@@ -30,7 +32,5 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # تثبيت مكتبة requests إذا لم تكن موجودة (احتياطاً)
           pip install requests
-          # تشغيل السكربت العبقري
           python3 notify_telegram.py
