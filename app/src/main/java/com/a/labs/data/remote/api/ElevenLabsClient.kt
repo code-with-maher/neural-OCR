@@ -38,15 +38,12 @@ class ElevenLabsClient(
         try {
             val url = "https://api.elevenlabs.io/v1/text-to-speech/$voiceId"
             val requestBody = json.encodeToString(ElevenLabsRequest(text))
-            
             val request = Request.Builder()
                 .url(url)
                 .header("xi-api-key", apiKey)
                 .post(requestBody.toRequestBody("application/json".toMediaType()))
                 .build()
-
             val response = client.newCall(request).execute()
-            
             if (response.isSuccessful) {
                 val outputFile = File(context.cacheDir, "$fileName.mp3")
                 response.body?.byteStream()?.use { input ->
@@ -55,11 +52,9 @@ class ElevenLabsClient(
                     }
                 }
                 Result.success(outputFile)
-            } else {
-                Result.failure(Exception("ElevenLabs Error: ${response.code}"))
-            }
+            } else Result.failure(Exception("ElevenLabs Error"))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-} في الصفحة نافذة AI Studio
+}
