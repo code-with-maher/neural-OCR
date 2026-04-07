@@ -31,7 +31,7 @@ class PdfExtractionWorker(
 
         val apiKey = settings.geminiKey.first()
         val modelName = settings.geminiModel.first()
-        val chunkSize = settings.chunkSize.first()
+        val chunkSizeValue = settings.chunkSize.first()
 
         if (apiKey.isBlank()) return Result.failure()
 
@@ -47,13 +47,11 @@ class PdfExtractionWorker(
 
         if (chunks.isEmpty()) {
             val totalPagesResult = chunker.getTotalPages(sourceUri)
-            if (totalPagesResult.isFailure) return Result.failure()
-
             val totalPages = totalPagesResult.getOrNull() ?: return Result.failure()
 
             var currentStart = 0
             while (currentStart < totalPages) {
-                val end = minOf(currentStart + chunkSize, totalPages)
+                val end = minOf(currentStart + chunkSizeValue, totalPages)
                 val newChunk = ChunkEntity(
                     id = UUID.randomUUID().toString(),
                     bookId = bookId,
@@ -79,37 +77,30 @@ class PdfExtractionWorker(
 
             if (fileUri == null) {
                 val fileName = "chunk_${bookId}_${chunk.startPage}.pdf"
-                val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunkSize, fileName)
-                if (chunkResult.isFailure) return Result.retry()
-
+                val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunkSizeValue, fileName)
                 val chunkFile = chunkResult.getOrNull() ?: return Result.retry()
 
                 val uploadResult = filesClient.uploadPdfChunk(chunkFile)
-                if (uploadResult.isFailure) {
+                fileUri = uploadResult.getOrNull()
+                
+                if (fileUri == null) {
                     chunkFile.delete()
                     return Result.retry()
                 }
-
-                fileUri = uploadResult.getOrNull() ?: {
-                    chunkFile.delete()
-                    return Result.retry()
-                }()
                 
                 repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri)
                 chunkFile.delete()
             }
 
             val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
-            if (ocrResult.isFailure) return Result.retry()
-
-            val extractedData = ocrResult.getOrNull() ?: return  Result.retry()
+            val extractedData = ocrResult.getOrNull() ?: return Result.retry()
 
             val pageEntities = extractedData.pages.map {
                 PageEntity(
                     id = UUID.randomUUID().toString(),
                     bookId = bookId,
                     pageNumber = it.pageNumber,
-                    markdownContent = it.markdownContent
+                    markdownContent =  it.markdownContent
                 )
             }
 
