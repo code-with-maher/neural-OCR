@@ -27,12 +27,24 @@ fun ReaderScreen(
     val pageData by viewModel.currentPageData.collectAsState()
     val currentPageNumber by viewModel.currentPageNumber.collectAsState()
     val isPlaying by viewModel.audioController.isPlaying.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
     
     var showSaveDialog by remember { mutableStateOf(false) }
     var tempTitle by remember { mutableStateOf("") }
 
     LaunchedEffect(bookId) {
         viewModel.loadBook(bookId)
+    }
+
+    if (errorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearError() },
+            title = { Text("تنبيه", fontWeight = FontWeight.Bold) },
+            text = { Text(errorMessage!!) },
+            confirmButton = {
+                Button(onClick = { viewModel.clearError() }) { Text("حسناً") }
+            }
+        )
     }
 
     Scaffold(
@@ -86,14 +98,14 @@ fun ReaderScreen(
                         IconButton(onClick = { viewModel.audioController.seekBackward() }) {
                             Icon(Icons.Default.Replay10, contentDescription = "تراجع 10 ثواني")
                         }
-                        LargeFloatingActionButton(
+                         LargeFloatingActionButton(
                             onClick = { viewModel.playAudio() },
                             containerColor = MaterialTheme.colorScheme.primaryContainer
                         ) {
                             Icon(
                                 if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (isPlaying) "إيقاف مؤقت" else "تشغيل"
-                             )
+                            )
                         }
                         IconButton(onClick = { viewModel.audioController.seekForward() }) {
                             Icon(Icons.Default.Forward10, contentDescription = "تقديم 10 ثواني")
@@ -151,10 +163,7 @@ fun ReaderScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = {
-                    /* Logic to update title in DB via ViewModel */
-                    showSaveDialog = false
-                }) { Text("حفظ") }
+                Button(onClick = { showSaveDialog = false }) { Text("حفظ") }
             },
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false }) { Text("إلغاء") }
