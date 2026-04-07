@@ -29,11 +29,23 @@ fun LibraryScreen(
 ) {
     val context = LocalContext.current
     val books by viewModel.books.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
     
     val pdfPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { viewModel.addBook(context, it) }
+    }
+
+    if (errorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearError() },
+            title = { Text("تنبيه", fontWeight = FontWeight.Bold) },
+            text = { Text(errorMessage!!) },
+            confirmButton = {
+                Button(onClick = { viewModel.clearError() }) { Text("حسناً") }
+            }
+        )
     }
 
     Scaffold(
@@ -84,12 +96,12 @@ fun LibraryScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         ListItem(
-                            headlineContent = { Text(book.title, fontWeight = FontWeight.Bold) },
+                            headlineContent = { Text(book.title, fontWeight =  FontWeight.Bold) },
                             supportingContent = { Text("عدد الصفحات: ${book.totalPages}") },
                             leadingContent = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, null) },
                             trailingContent = {
                                 IconButton(onClick = { viewModel.deleteBook(book.id) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "حذف  الكتاب", tint = MaterialTheme.colorScheme.error)
+                                    Icon(Icons.Default.Delete, contentDescription = "حذف الكتاب", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
                         )
