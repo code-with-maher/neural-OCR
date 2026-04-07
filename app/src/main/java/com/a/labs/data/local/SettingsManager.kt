@@ -2,6 +2,7 @@ package com.a.labs.data.local
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.a.labs.core.GeminiModels
@@ -17,14 +18,16 @@ class SettingsManager(private val context: Context) {
         val ELEVEN_KEY = stringPreferencesKey("eleven_api_key")
         val TTS_ENGINE = stringPreferencesKey("tts_engine")
         val GEMINI_MODEL_KEY = stringPreferencesKey("gemini_model")
+        val CHUNK_SIZE_KEY = intPreferencesKey("chunk_size")
     }
 
     val geminiKey: Flow<String> = context.dataStore.data.map { it[GEMINI_KEY] ?: "" }
     val elevenKey: Flow<String> = context.dataStore.data.map { it[ELEVEN_KEY] ?: "" }
     val ttsEngine: Flow<String> = context.dataStore.data.map { it[TTS_ENGINE] ?: "SYSTEM" }
-    val geminiModel: Flow<String> = context.dataStore.data.map { it[GEMINI_MODEL_KEY] ?: GeminiModels.FLASH_2_5 }
+    val geminiModel: Flow<String> = context.dataStore.data.map { it[GEMINI_MODEL_KEY] ?: GeminiModels.FLASH_3_1_LITE }
+    val chunkSize: Flow<Int> = context.dataStore.data.map { it[CHUNK_SIZE_KEY] ?: 15 }
 
-    suspend fun saveSetting(key: androidx.datastore.preferences.core.Preferences.Key<String>, value: String) {
+    suspend fun <T> saveSetting(key: androidx.datastore.preferences.core.Preferences.Key<T>, value: T) {
         context.dataStore.edit { it[key] = value }
     }
 }
