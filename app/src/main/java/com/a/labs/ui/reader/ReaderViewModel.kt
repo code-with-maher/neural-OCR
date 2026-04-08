@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.a.labs.core.AppLogger
 import com.a.labs.data.audio.AudioPlayerController
 import com.a.labs.data.local.room.entity.BookEntity
 import com.a.labs.data.local.room.entity.PageEntity
@@ -84,13 +85,12 @@ class ReaderViewModel(
             while (true) {
                 if (_currentPageData.value == null) {
                     val chunks = repository.getChunksForBook(bookId)
-                    // البحث عن الدفعة التي تحتوي على هذه الصفحة (نطاق الصفحات)
                     val chunk = chunks.find { 
                         (_currentPageNumber.value - 1) >= it.startPage && (_currentPageNumber.value - 1) < it.endPage 
                     }
                     _isChunkFailed.value = chunk?.status == "FAILED"
                 }
-                delay(2000) // فحص كل ثانيتين بدون إرهاق الواجهة
+                delay(2000) 
             }
         }
     }
@@ -98,8 +98,8 @@ class ReaderViewModel(
     fun retryProcessing(context: Context) {
         val bookId = _currentBook.value?.id ?: return
         _isChunkFailed.value = false
-        val  workRequest = OneTimeWorkRequestBuilder<PdfExtractionWorker>()
-            .setInputData(workDataOf("bookId" to bookId))
+        val workRequest = OneTimeWorkRequestBuilder<PdfExtractionWorker>()
+             .setInputData(workDataOf("bookId" to bookId))
             .build()
         WorkManager.getInstance(context).enqueue(workRequest)
     }
@@ -157,38 +157,47 @@ class ReaderViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = File(audioPath)
-                val bookTitle = _currentBook.value?.title ?: "book"
+                val bookTitle = _currentBook.value?.title?.replace(" ", "_") ?: "book"
                 val pageNum = _currentPageNumber.value
                 val fileName = "${bookTitle}_page_$pageNum.wav"
 
-                val values = ContentValues().apply {
-                    put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
-                    put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
-
-                val resolver = context.contentResolver
-                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
-                
-                if (uri != null) {
-                    resolver.openOutputStream(uri)?.use { outputStream ->
-                        FileInputStream(file).use { inputStream ->
-                            inputStream.copyTo(outputStream)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                        put(MediaStore.Downloads.MIME_TYPE, "audio/wav")
+                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    }
+                    val resolver = context.contentResolver
+                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    if (uri != null) {
+                        resolver.openOutputStream(uri)?.use { outputStream ->
+                            FileInputStream(file).use { inputStream -> inputStream.copyTo(outputStream) }
                         }
+                        _toastMessage.value = "تم حفظ الملف الصوتي في التنزيلات."
+                    } else {
+                        _toastMessage.value = "فشل في حفظ الملف الصوتي."
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val destFile = File(downloadsDir, fileName)
+                    FileInputStream(file).use { input ->
+                        java.io.FileOutputStream(destFile).use { output -> input.copyTo(output) }
                     }
                     _toastMessage.value = "تم حفظ الملف الصوتي في التنزيلات."
-                } else {
-                    _toastMessage.value = "فشل في حفظ الملف الصوتي."
                 }
             } catch (e: Exception) {
-                _toastMessage.value = "حدث خطأ أثناء الحفظ."
+                _toastMessage.value = "حدث خطأ أثناء الحفظ: ${e.localizedMessage}"
+                viewModelScope.launch { 
+                    AppLogger.log(context, true, "خطأ تصدير الصوت: \n${e.stackTraceToString()}") 
+                }
             }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        statusMonitorJob?.cancel()
+         statusMonitorJob?.cancel()
         audioController.release()
      }
 }
