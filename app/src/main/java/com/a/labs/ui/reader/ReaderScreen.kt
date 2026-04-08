@@ -1,5 +1,9 @@
 package com.a.labs.ui.reader
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -23,17 +28,26 @@ fun ReaderScreen(
     viewModel: ReaderViewModel,
     bookId: String
 ) {
+    val context = LocalContext.current
     val book by viewModel.currentBook.collectAsState()
     val pageData by viewModel.currentPageData.collectAsState()
     val currentPageNumber by viewModel.currentPageNumber.collectAsState()
     val isPlaying by viewModel.audioController.isPlaying.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
-    
-    var showSaveDialog by remember { mutableStateOf(false) }
-    var tempTitle by remember { mutableStateOf("") }
+    val toastMessage by viewModel.toastMessage.collectAsState()
+
+    var showMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(bookId) {
         viewModel.loadBook(bookId)
+    }
+
+    LaunchedEffect(toastMessage) {
+        toastMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearToast()
+        }
     }
 
     if (errorMessage != null) {
@@ -43,6 +57,28 @@ fun ReaderScreen(
             text = { Text(errorMessage!!) },
             confirmButton = {
                 Button(onClick = { viewModel.clearError() }) { Text("حسناً") }
+            }
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("تأكيد الحذف") },
+            text = { Text("هل أنت متأكد أنك تريد حذف هذا الكتاب وكل محتوياته؟ لا يمكن التراجع عن هذا الإجراء.") },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        viewModel.deleteCurrentBook {
+                            navController.popBackStack()
+                        }
+                    }
+                ) { Text("حذف") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("إلغاء") }
             }
         )
     }
@@ -64,16 +100,48 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
-                    if (book?.title?.startsWith("كتاب جديد") == true) {
-                        IconButton(onClick = { 
-                            tempTitle = book?.title ?: ""
-                            showSaveDialog = true 
-                        }) {
-                            Icon(Icons.Default.Save, contentDescription = "حفظ الكتاب باسم")
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "المزيد من الخيارات")
                         }
-                    }
-                    IconButton(onClick = { /* More options logic */ }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "المزيد")
+                        DropdownMenu(
+                             expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("نسخ النص") },
+                                onClick = {
+                                    showMenu = false
+                                    pageData?.markdownContent?.let { content ->
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("Copied Text", content)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "تم نسخ النص", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("الإعدادات") },
+                                onClick = {
+                                    showMenu = false
+                                    navController.navigate("settings")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("تحميل الصوت") },
+                                onClick = {
+                                    showMenu = false
+                                    viewModel.exportCurrentAudio(context)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("حذف الكتاب", color = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    showMenu = false
+                                    showDeleteConfirmDialog = true
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -113,7 +181,7 @@ fun ReaderScreen(
                         IconButton(onClick = { viewModel.nextPage() }) {
                             Icon(Icons.Default.SkipNext, contentDescription = "الصفحة التالية")
                         }
-                    }
+                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "صفحة $currentPageNumber من ${book?.totalPages ?: "?"}",
@@ -128,46 +196,37 @@ fun ReaderScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(16.dp))
-                    Text("جاري معالجة الصفحة بالذكاء الاصطناعي...")
+                    Text("جاري معالجة الصفحة أو انتظار الوصول...")
                 }
             }
         } else {
-            val paragraphs = pageData!!.markdownContent.split("\n\n").filter { it.isNotBlank() }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(paragraphs) { paragraph ->
+            val content = pageData!!.markdownContent
+            if (content == "الصفحة فارغة") {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                     Text(
-                        text = paragraph,
+                        text = "هذه الصفحة فارغة أو تحتوي على صورة فقط بدون نص.",
                         style = MaterialTheme.typography.bodyLarge,
-                        lineHeight = 32.sp,
-                        textAlign = TextAlign.Justify
+                        color = MaterialTheme.colorScheme.outline,
+                        textAlign = TextAlign.Center
                     )
+                }
+            } else {
+                val paragraphs = content.split("\n\n").filter { it.isNotBlank() }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentPadding = PaddingValues(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(paragraphs) { paragraph ->
+                        Text(
+                            text = paragraph,
+                            style = MaterialTheme.typography.bodyLarge,
+                            lineHeight = 32.sp,
+                            textAlign = TextAlign.Justify
+                        )
+                    }
                 }
             }
         }
-    }
-
-    if (showSaveDialog) {
-        AlertDialog(
-            onDismissRequest = { showSaveDialog = false },
-            title = { Text("حفظ الكتاب") },
-            text = {
-                OutlinedTextField(
-                    value = tempTitle,
-                    onValueChange = { tempTitle = it },
-                    label = { Text("اسم الكتاب") },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                Button(onClick = { showSaveDialog = false }) { Text("حفظ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSaveDialog = false }) { Text("إلغاء") }
-            }
-        )
      }
 }
