@@ -31,6 +31,7 @@ fun ReaderScreen(
     val context = LocalContext.current
     val book by viewModel.currentBook.collectAsState()
     val pageData by viewModel.currentPageData.collectAsState()
+    val isChunkFailed by viewModel.isChunkFailed.collectAsState()
     val currentPageNumber by viewModel.currentPageNumber.collectAsState()
     val isPlaying by viewModel.audioController.isPlaying.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -65,7 +66,7 @@ fun ReaderScreen(
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
             title = { Text("تأكيد الحذف") },
-            text = { Text("هل أنت متأكد أنك تريد حذف هذا الكتاب وكل محتوياته؟ لا يمكن التراجع عن هذا الإجراء.") },
+            text = { Text("هل أنت متأكد أنك تريد حذف هذا الكتاب وكل محتوياته؟") },
             confirmButton = {
                 Button(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -104,8 +105,8 @@ fun ReaderScreen(
                         IconButton(onClick = { showMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "المزيد من الخيارات")
                         }
-                        DropdownMenu(
-                             expanded = showMenu,
+                         DropdownMenu(
+                            expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
                             DropdownMenuItem(
@@ -180,8 +181,8 @@ fun ReaderScreen(
                         }
                         IconButton(onClick = { viewModel.nextPage() }) {
                             Icon(Icons.Default.SkipNext, contentDescription = "الصفحة التالية")
-                        }
-                     }
+                         }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "صفحة $currentPageNumber من ${book?.totalPages ?: "?"}",
@@ -193,10 +194,22 @@ fun ReaderScreen(
     ) { padding ->
         if (pageData == null) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(16.dp))
-                    Text("جاري معالجة الصفحة أو انتظار الوصول...")
+                if (isChunkFailed) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.ErrorOutline, contentDescription = "خطأ", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(16.dp))
+                        Text("فشلت معالجة هذه الصفحة (تأكد من الإنترنت).", textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = { viewModel.retryProcessing(context) }) {
+                            Text("إعادة المحاولة")
+                        }
+                    }
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(16.dp))
+                        Text("جاري معالجة الصفحة أو انتظار الوصول...")
+                    }
                 }
             }
         } else {
