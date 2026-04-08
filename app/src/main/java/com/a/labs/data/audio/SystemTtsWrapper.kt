@@ -1,6 +1,7 @@
 package com.a.labs.data.audio
 
 import android.content.Context
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -16,25 +17,44 @@ class SystemTtsWrapper(private val context: Context) {
 
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
-                val params = android.os.Bundle()
+                // محاولة تعيين اللغة العربية إن أمكن
+                val arabicLocale = Locale("ar")
+                if (tts?.isLanguageAvailable(arabicLocale) ?: -1 >= TextToSpeech.LANG_AVAILABLE) {
+                    tts?.language = arabicLocale
+                } else {
+                    tts?.language = Locale.getDefault()
+                }
+
+                val params = Bundle()
                 params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, fileName)
-                
+
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) {
                         tts?.stop()
                         tts?.shutdown()
-                        continuation.resume(Result.success(outputFile))
+                        if (continuation.isActive) {
+                            continuation.resume(Result.success(outputFile))
+                        }
                     }
                     override fun onError(utteranceId: String?) {
-                        continuation.resume(Result.failure(Exception("System TTS Error")))
+                        tts?.stop()
+                        tts?.shutdown()
+                        if (continuation.isActive) {
+                            continuation.resume(Result.failure(Exception("System TTS Error")))
+                        }
                     }
                 })
-                
-                tts?.synthesizeToFile(text, params, outputFile, fileName)
+
+                val result = tts?.synthesizeToFile(text, params, outputFile, fileName)
+                if (result != TextToSpeech.SUCCESS) {
+                    tts?.shutdown()
+                    if (continuation.isActive) continuation.resume(Result.failure(Exception("Failed to start synthesis")))
+                }
             } else {
-                continuation.resume(Result.failure(Exception("TTS Initialization Failed")))
+                if (continuation.isActive) {
+                    continuation.resume(Result.failure(Exception("TTS Initialization Failed")))
+                }
             }
         }
 
