@@ -8,6 +8,7 @@ import com.a.labs.domain.usecase.PdfChunkerUseCase
 import com.a.labs.ui.library.LibraryViewModel
 import com.a.labs.ui.reader.ReaderViewModel
 
+@Suppress("UNCHECKED_CAST")
 class ViewModelFactory(
     private val repository: BookRepository,
     private val chunkerUseCase: PdfChunkerUseCase? = null,
