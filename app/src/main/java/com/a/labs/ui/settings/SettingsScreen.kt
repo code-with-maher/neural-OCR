@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import com.a.labs.core.GeminiModels
 import com.a.labs.data.local.SettingsManager
 import kotlinx.coroutines.launch
 
+@Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavHostController) {
@@ -92,8 +94,8 @@ fun SettingsScreen(navController: NavHostController) {
             },
             confirmButton = {
                 Button(onClick = {
-                    scope.launch { settingsManager.saveSetting(SettingsManager.ELEVEN_KEY, tempElevenKey) }
-                     showElevenDialog = false
+                     scope.launch { settingsManager.saveSetting(SettingsManager.ELEVEN_KEY, tempElevenKey) }
+                    showElevenDialog = false
                     Toast.makeText(context, "تم حفظ المفتاح بنجاح", Toast.LENGTH_SHORT).show()
                 }) { Text("حفظ") }
             },
@@ -167,10 +169,10 @@ fun SettingsScreen(navController: NavHostController) {
                                         modelExpanded = false
                                     })
                                 }
-                            }
+                             }
                         }
 
-                         ExposedDropdownMenuBox(expanded = engineExpanded, onExpandedChange = { engineExpanded = !engineExpanded }) {
+                        ExposedDropdownMenuBox(expanded = engineExpanded, onExpandedChange = { engineExpanded = !engineExpanded }) {
                             OutlinedTextField(
                                 value = selectedEngine,
                                 onValueChange = {},
@@ -231,7 +233,7 @@ fun SettingsScreen(navController: NavHostController) {
                                 headlineContent = { Text("عرض سجلات النظام", color = MaterialTheme.colorScheme.onErrorContainer) },
                                 leadingContent = { Icon(Icons.Default.BugReport, null, tint = MaterialTheme.colorScheme.onErrorContainer) },
                                 modifier = Modifier.clickable { navController.navigate("logs") },
-                                colors = ListItemDefaults.colors(containerColor =  androidx.compose.ui.graphics.Color.Transparent)
+                                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
                             )
                         }
                     }
@@ -244,7 +246,7 @@ fun SettingsScreen(navController: NavHostController) {
                     Column {
                         ListItem(
                             headlineContent = { Text("تواصل معنا عبر واتساب") },
-                            leadingContent = { Icon(Icons.Default.Chat, null) },
+                            leadingContent = { Icon(Icons.AutoMirrored.Filled.Chat, null) },
                             modifier = Modifier.clickable {
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/963946709091"))
                                 context.startActivity(intent)
