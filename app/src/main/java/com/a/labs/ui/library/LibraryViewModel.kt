@@ -4,7 +4,10 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.Constraints
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.a.labs.data.local.room.entity.BookEntity
@@ -12,6 +15,7 @@ import com.a.labs.data.repository.BookRepository
 import com.a.labs.domain.usecase.PdfChunkerUseCase
 import com.a.labs.worker.PdfExtractionWorker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,12 +37,26 @@ class LibraryViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    fun clearError() { _errorMessage.value = null }
+    private val _showRangeDialog = MutableStateFlow(false)
+    val showRangeDialog: StateFlow<Boolean> = _showRangeDialog.asStateFlow()
 
-    fun addBook(context: Context, uri: Uri, customTitle: String? = null) {
+    private val _showProgressDialog = MutableStateFlow(false)
+    val showProgressDialog: StateFlow<Boolean> = _showProgressDialog.asStateFlow()
+
+    var pendingFileUri: Uri? = null
+    var pendingTotalPages: Int = 0
+    var pendingBookId: String = ""
+
+    private val _readyToNavigateBookId = MutableStateFlow<String?>(null)
+    val readyToNavigateBookId: StateFlow<String?> = _readyToNavigateBookId.asStateFlow()
+
+    fun clearError() { _errorMessage.value = null }
+    fun dismissRangeDialog() { _showRangeDialog.value = false }
+    fun onNavigated() { _readyToNavigateBookId.value = null }
+
+    fun prepareBook(context: Context, uri: Uri) {
         viewModelScope.launch {
             try {
-                // الحل العبقري: نسخ الملف محلياً لتجنب فقدان صلاحية القراءة في الخلفية
                 val localFile = withContext(Dispatchers.IO) {
                     val file = File(context.filesDir, "book_${UUID.randomUUID()}.pdf")
                     context.contentResolver.openInputStream(uri)?.use { input ->
@@ -51,7 +69,7 @@ class LibraryViewModel(
                 val totalPagesResult = chunkerUseCase.getTotalPages(safeUri)
 
                 if (totalPagesResult.isFailure) {
-                    _errorMessage.value = "تعذر قراءة ملف PDF. قد يكون محمياً بكلمة مرور أو معطوباً."
+                    _errorMessage.value = "تعذر قراءة ملف PDF. قد يكون محمياً أو معطوباً."
                     return@launch
                 }
 
@@ -61,33 +79,80 @@ class LibraryViewModel(
                     return@launch
                 }
 
-                val bookId = UUID.randomUUID().toString()
-                val title = customTitle ?: "كتاب جديد"
-
-                val newBook = BookEntity(
-                    id = bookId,
-                    title = title,
-                    sourcePdfUri = safeUri.toString(),
-                    totalPages = totalPages
-                )
-
-                repository.insertBook(newBook)
-                startExtractionWork(context, bookId)
+                pendingFileUri = safeUri
+                pendingTotalPages = totalPages
+                pendingBookId = UUID.randomUUID().toString()
+                _showRangeDialog.value = true
 
             } catch (e: Exception) {
-                _errorMessage.value = "حدث خطأ غير متوقع أثناء إضافة الكتاب: ${e.localizedMessage}"
+                _errorMessage.value = "خطأ أثناء التهيئة: ${e.localizedMessage}"
             }
         }
     }
 
-    private fun startExtractionWork(context: Context, bookId: String) {
-        val workRequest = OneTimeWorkRequestBuilder<PdfExtractionWorker>()
-            .setInputData(workDataOf("bookId" to bookId))
-            .build()
-        WorkManager.getInstance(context).enqueue(workRequest)
+    fun startExtraction(context: Context, title: String, startPage: Int, endPage: Int) {
+        _showRangeDialog.value = false
+        _showProgressDialog.value = true
+
+        viewModelScope.launch {
+            try {
+                val newBook = BookEntity(
+                    id = pendingBookId,
+                    title = title.ifBlank { "كتاب جديد" },
+                    sourcePdfUri = pendingFileUri.toString(),
+                    totalPages = pendingTotalPages,
+                     lastReadPage = startPage
+                )
+                repository.insertBook(newBook)
+
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+
+                val workRequest = OneTimeWorkRequestBuilder<PdfExtractionWorker>()
+                    .setConstraints(constraints)
+                    .setInputData(
+                        workDataOf(
+                            "bookId" to pendingBookId,
+                            "startPage" to startPage,
+                            "endPage" to endPage
+                        )
+                    )
+                    .build()
+
+                val workManager = WorkManager.getInstance(context)
+                workManager.enqueue(workRequest)
+
+                monitorExtractionProgress(context, workRequest.id, pendingBookId, startPage)
+
+            } catch (e: Exception) {
+                _showProgressDialog.value = false
+                _errorMessage.value = "فشل بدء المعالجة: ${e.localizedMessage}"
+            }
+        }
     }
 
-    fun deleteBook(bookId: String) {
-        viewModelScope.launch { repository.deleteBook(bookId) }
-    }
+    private fun monitorExtractionProgress(context: Context, workId: UUID, bookId: String, targetStartPage: Int) {
+        viewModelScope.launch {
+            var isNavigated = false
+            
+            repository.getPagesForBook(bookId).collect { pages ->
+                if (!isNavigated && pages.any { it.pageNumber == targetStartPage }) {
+                    isNavigated = true
+                    _showProgressDialog.value = false
+                    _readyToNavigateBookId.value = bookId
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            WorkManager.getInstance(context).getWorkInfoByIdFlow(workId).collect { workInfo ->
+                if (workInfo != null && workInfo.state == WorkInfo.State.FAILED) {
+                    _showProgressDialog.value = false
+                    val errorMsg = workInfo.outputData.getString("error") ?: "حدث خطأ غير معروف في خوادم الذكاء الاصطناعي."
+                    _errorMessage.value = "توقفت المعالجة: $errorMsg"
+                }
+            }
+        }
+     }
 }
