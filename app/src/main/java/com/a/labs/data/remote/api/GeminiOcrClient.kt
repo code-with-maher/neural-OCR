@@ -27,7 +27,6 @@ class GeminiOcrClient(
     private val apiKey: String,
     private val modelName: String
 ) {
-    // جعلنا المحلل متساهلاً جداً ليتجاهل أي حقول إضافية غير متوقعة
     private val jsonConfig = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -86,22 +85,21 @@ class GeminiOcrClient(
 
             val request = Request.Builder().url(url).post(requestBody).build()
             val response = client.newCall(request).execute()
-            val responseString = response.body?.string()
+            val responseString = response.body.string()
 
-            if (response.isSuccessful && responseString != null) {
+            if (response.isSuccessful) {
                 val geminiResponse = jsonConfig.decodeFromString<GeminiResponse>(responseString)
                 val rawJsonText = geminiResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 
                 if (rawJsonText != null) {
-                    // الحل العبقري: إزالة علامات Markdown التي يضيفها Gemini  أحياناً وتدمر الـ Parser
                     val cleanJson = rawJsonText.replace(Regex("```json\n?|```"), "").trim()
-                    val ocrResult = jsonConfig.decodeFromString<OcrResultDto>(cleanJson)
+                    val ocrResult =  jsonConfig.decodeFromString<OcrResultDto>(cleanJson)
                     Result.success(ocrResult)
                 } else {
                     Result.failure(Exception("استجابة Gemini فارغة أو لا تحتوي على نص."))
                 }
             } else {
-                Result.failure(Exception("فشل الاتصال: ${response.code}"))
+                Result.failure(Exception("فشل الاتصال: ${response.code} - $responseString"))
             }
         } catch (e: Exception) {
             Result.failure(e)
