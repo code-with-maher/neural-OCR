@@ -6,17 +6,22 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.a.labs.data.audio.AudioPlayerController
 import com.a.labs.data.local.room.entity.BookEntity
 import com.a.labs.data.local.room.entity.PageEntity
 import com.a.labs.data.repository.BookRepository
+import com.a.labs.worker.PdfExtractionWorker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 
@@ -34,11 +39,16 @@ class ReaderViewModel(
     private val _currentPageData = MutableStateFlow<PageEntity?>(null)
     val currentPageData: StateFlow<PageEntity?> = _currentPageData.asStateFlow()
 
+    private val _isChunkFailed = MutableStateFlow(false)
+    val isChunkFailed: StateFlow<Boolean> = _isChunkFailed.asStateFlow()
+
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+
+    private var statusMonitorJob: Job? = null
 
     fun clearError() { _errorMessage.value = null }
     fun clearToast() { _toastMessage.value = null }
@@ -50,9 +60,13 @@ class ReaderViewModel(
                 _currentBook.value = book
                 book?.let { b ->
                     _currentPageNumber.value = b.lastReadPage
+                    startStatusMonitoring(b.id)
+                    
                     viewModelScope.launch {
                         repository.getPagesForBook(b.id).collect { pages ->
-                            _currentPageData.value = pages.find { it.pageNumber == _currentPageNumber.value }
+                            val page = pages.find { it.pageNumber == _currentPageNumber.value }
+                            _currentPageData.value = page
+                            if (page != null) _isChunkFailed.value = false
                         }
                     }
                 } ?: run {
@@ -64,12 +78,40 @@ class ReaderViewModel(
         }
     }
 
+    private fun startStatusMonitoring(bookId: String) {
+        statusMonitorJob?.cancel()
+        statusMonitorJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                if (_currentPageData.value == null) {
+                    val chunks = repository.getChunksForBook(bookId)
+                    // البحث عن الدفعة التي تحتوي على هذه الصفحة (نطاق الصفحات)
+                    val chunk = chunks.find { 
+                        (_currentPageNumber.value - 1) >= it.startPage && (_currentPageNumber.value - 1) < it.endPage 
+                    }
+                    _isChunkFailed.value = chunk?.status == "FAILED"
+                }
+                delay(2000) // فحص كل ثانيتين بدون إرهاق الواجهة
+            }
+        }
+    }
+
+    fun retryProcessing(context: Context) {
+        val bookId = _currentBook.value?.id ?: return
+        _isChunkFailed.value = false
+        val  workRequest = OneTimeWorkRequestBuilder<PdfExtractionWorker>()
+            .setInputData(workDataOf("bookId" to bookId))
+            .build()
+        WorkManager.getInstance(context).enqueue(workRequest)
+    }
+
     fun loadPage(bookId: String, pageNumber: Int) {
         viewModelScope.launch {
             _currentPageNumber.value = pageNumber
             repository.updateLastReadPage(bookId, pageNumber)
             val pages = repository.getPagesForBook(bookId).first()
-            _currentPageData.value = pages.find { it.pageNumber == pageNumber }
+            val page = pages.find { it.pageNumber == pageNumber }
+            _currentPageData.value = page
+            if (page != null) _isChunkFailed.value = false
         }
     }
 
@@ -90,7 +132,7 @@ class ReaderViewModel(
     fun playAudio() {
         val book = _currentBook.value ?: return
         if (_currentPageData.value == null) {
-            _errorMessage.value = "النص غير جاهز بعد. يرجى انتظار المعالجة."
+            _toastMessage.value = "النص غير جاهز بعد."
             return
         }
         audioController.playPage(book.id, _currentPageNumber.value)
@@ -108,7 +150,7 @@ class ReaderViewModel(
     fun exportCurrentAudio(context: Context) {
         val audioPath = _currentPageData.value?.audioUri
         if (audioPath == null || !File(audioPath).exists()) {
-             _toastMessage.value = "يجب تشغيل الصوت أولاً لتوليده قبل تحميله."
+            _toastMessage.value = "يجب تشغيل الصوت أولاً لتوليده قبل تحميله."
             return
         }
 
@@ -146,6 +188,7 @@ class ReaderViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        statusMonitorJob?.cancel()
         audioController.release()
      }
 }
