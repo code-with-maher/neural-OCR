@@ -1,6 +1,7 @@
 package com.a.labs.data.local
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -19,6 +20,8 @@ class SettingsManager(private val context: Context) {
         val TTS_ENGINE = stringPreferencesKey("tts_engine")
         val GEMINI_MODEL_KEY = stringPreferencesKey("gemini_model")
         val CHUNK_SIZE_KEY = intPreferencesKey("chunk_size")
+        val DEV_MODE_UNLOCKED = booleanPreferencesKey("dev_mode_unlocked")
+        val LOGGING_ENABLED = booleanPreferencesKey("logging_enabled")
     }
 
     val geminiKey: Flow<String> = context.dataStore.data.map { it[GEMINI_KEY] ?: "" }
@@ -26,6 +29,8 @@ class SettingsManager(private val context: Context) {
     val ttsEngine: Flow<String> = context.dataStore.data.map { it[TTS_ENGINE] ?: "SYSTEM" }
     val geminiModel: Flow<String> = context.dataStore.data.map { it[GEMINI_MODEL_KEY] ?: GeminiModels.FLASH_3_1_LITE }
     val chunkSize: Flow<Int> = context.dataStore.data.map { it[CHUNK_SIZE_KEY] ?: 15 }
+    val isDevModeUnlocked: Flow<Boolean> = context.dataStore.data.map { it[DEV_MODE_UNLOCKED] ?: false }
+    val isLoggingEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOGGING_ENABLED] ?: false }
 
     suspend fun <T> saveSetting(key: androidx.datastore.preferences.core.Preferences.Key<T>, value: T) {
         context.dataStore.edit { it[key] = value }
