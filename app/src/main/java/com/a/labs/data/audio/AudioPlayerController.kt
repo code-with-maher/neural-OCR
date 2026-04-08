@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 class AudioPlayerController(
     private val context: Context,
@@ -46,7 +47,16 @@ class AudioPlayerController(
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private var progressJob: Job? = null
-    private val httpClient = OkHttpClient()
+    
+    private var loadedBookId: String? = null
+    private var loadedPageNum: Int = -1
+
+    // حل مشكلة الـ Timeout: زيادة وقت الانتظار لدقيقتين لتجنب فشل Gemini TTS
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
 
     init {
         initializeController()
@@ -64,12 +74,14 @@ class AudioPlayerController(
                 override fun onPlaybackStateChanged(state: Int) {
                     if (state == Player.STATE_READY) {
                         _duration.value = controller?.duration ?: 0L
+                    } else if (state == Player.STATE_ENDED) {
+                        _isPlaying.value = false
                     }
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     scope.launch {
                         val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
-                        AppLogger.log(context, isLoggingEnabled, "Media3 Player Error: ${error.message}")
+                        AppLogger.log(context, isLoggingEnabled, "Media3 Player Error: ${error.message} - ${error.errorCodeName}")
                     }
                 }
             })
@@ -77,6 +89,15 @@ class AudioPlayerController(
     }
 
     fun playPage(bookId: String, pageNumber: Int) {
+        // الحل العبقري لمشكلة إعادة التشغيل: إذا كانت نفس الصفحة محملة مسبقاً، نكتفي بالتبديل
+        if (loadedBookId == bookId && loadedPageNum == pageNumber && (controller?.mediaItemCount ?: 0) > 0) {
+            togglePlay()
+             return
+        }
+
+        loadedBookId = bookId
+        loadedPageNum = pageNumber
+
         scope.launch {
             val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
             val page = repository.getPageByNumber(bookId, pageNumber) ?: return@launch
@@ -84,13 +105,13 @@ class AudioPlayerController(
             val apiKeyGemini = settingsManager.geminiKey.first()
             val apiKeyEleven = settingsManager.elevenKey.first()
 
-            AppLogger.log(context, isLoggingEnabled, "محاولة تشغيل الصوت للصفحة $pageNumber باستخدام محرك: $engine")
+            AppLogger.log(context, isLoggingEnabled, "محاولة إعداد الصوت للصفحة $pageNumber باستخدام محرك: $engine")
 
             val audioFile = if (page.audioUri != null && File(page.audioUri).exists()) {
-                AppLogger.log(context, isLoggingEnabled, "تم العثور على ملف صوتي جاهز محلياً.")
+                AppLogger.log(context, isLoggingEnabled, "تم العثور على ملف صوتي محلي: ${page.audioUri}")
                 File(page.audioUri)
             } else {
-                 AppLogger.log(context, isLoggingEnabled, "لا يوجد ملف صوتي، جاري التوليد...")
+                AppLogger.log(context, isLoggingEnabled, "جاري التوليد الصوتي عبر الشبكة...")
                 val fileName = "audio_${bookId}_$pageNumber"
                 val result = when (engine) {
                     "ELEVENLABS" -> ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, fileName)
@@ -100,28 +121,36 @@ class AudioPlayerController(
 
                 val file = result.getOrNull()
                 if (file != null) {
-                    AppLogger.log(context, isLoggingEnabled, "تم توليد الملف الصوتي بنجاح وحفظه.")
+                    AppLogger.log(context, isLoggingEnabled, "تم التوليد بنجاح.")
                     val updatedPage = page.copy(audioUri = file.absolutePath)
                     repository.insertPages(listOf(updatedPage))
                     file
                 } else {
-                    AppLogger.log(context, isLoggingEnabled, "فشل توليد الصوت: ${result.exceptionOrNull()?.localizedMessage}")
+                    AppLogger.log(context, isLoggingEnabled, "فشل التوليد: ${result.exceptionOrNull()?.message}\n${result.exceptionOrNull()?.stackTraceToString()}")
                     null
                 }
             }
 
             audioFile?.let {
+                AppLogger.log(context, isLoggingEnabled, "تمرير الملف إلى Media3 للبدء...")
                 val mediaItem = MediaItem.fromUri(it.absolutePath)
                 controller?.setMediaItem(mediaItem)
                 controller?.prepare()
                 controller?.play()
-                AppLogger.log(context, isLoggingEnabled, "تم إرسال الملف إلى مشغل Media3 للبدء.")
             }
         }
     }
 
     fun togglePlay() {
-        if (controller?.isPlaying == true) controller?.pause() else controller?.play()
+        if (controller?.isPlaying == true) {
+            controller?.pause()
+        } else {
+            // إذا انتهى المقطع، نعيده من البداية
+            if (controller?.playbackState == Player.STATE_ENDED) {
+                controller?.seekTo(0)
+            }
+            controller?.play()
+        }
     }
 
     fun seekForward() = controller?.seekTo((controller?.currentPosition ?: 0L) + 10000)
