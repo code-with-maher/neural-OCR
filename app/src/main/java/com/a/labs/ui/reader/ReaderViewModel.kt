@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.a.labs.core.AppLogger
 import com.a.labs.data.audio.AudioPlayerController
+import com.a.labs.data.local.SettingsManager
 import com.a.labs.data.local.room.entity.BookEntity
 import com.a.labs.data.local.room.entity.PageEntity
 import com.a.labs.data.repository.BookRepository
@@ -98,8 +99,8 @@ class ReaderViewModel(
     fun retryProcessing(context: Context) {
         val bookId = _currentBook.value?.id ?: return
         _isChunkFailed.value = false
-        val workRequest = OneTimeWorkRequestBuilder<PdfExtractionWorker>()
-             .setInputData(workDataOf("bookId" to bookId))
+        val workRequest =  OneTimeWorkRequestBuilder<PdfExtractionWorker>()
+            .setInputData(workDataOf("bookId" to bookId))
             .build()
         WorkManager.getInstance(context).enqueue(workRequest)
     }
@@ -148,13 +149,21 @@ class ReaderViewModel(
     }
 
     fun exportCurrentAudio(context: Context) {
-        val audioPath = _currentPageData.value?.audioUri
-        if (audioPath == null || !File(audioPath).exists()) {
-            _toastMessage.value = "يجب تشغيل الصوت أولاً لتوليده قبل تحميله."
-            return
-        }
-
         viewModelScope.launch(Dispatchers.IO) {
+            val settingsManager = SettingsManager(context)
+            val engine = settingsManager.ttsEngine.first()
+            
+            if (engine == "SYSTEM") {
+                _toastMessage.value = "لا يمكن تحميل الصوت مع محرك النظام (النطق المباشر)."
+                return@launch
+            }
+
+            val audioPath = _currentPageData.value?.audioUri
+            if (audioPath == null || !File(audioPath).exists()) {
+                _toastMessage.value = "يجب تشغيل الصوت أولاً لتوليده قبل تحميله."
+                return@launch
+            }
+
             try {
                 val file = File(audioPath)
                 val bookTitle = _currentBook.value?.title?.replace(" ", "_") ?: "book"
@@ -184,20 +193,18 @@ class ReaderViewModel(
                     FileInputStream(file).use { input ->
                         java.io.FileOutputStream(destFile).use { output -> input.copyTo(output) }
                     }
-                    _toastMessage.value = "تم حفظ الملف الصوتي في التنزيلات."
+                    _toastMessage.value = "تم حفظ الملف الصوتي في  التنزيلات."
                 }
             } catch (e: Exception) {
                 _toastMessage.value = "حدث خطأ أثناء الحفظ: ${e.localizedMessage}"
-                viewModelScope.launch { 
-                    AppLogger.log(context, true, "خطأ تصدير الصوت: \n${e.stackTraceToString()}") 
-                }
+                AppLogger.log(context, true, "خطأ تصدير الصوت: \n${e.stackTraceToString()}") 
             }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-         statusMonitorJob?.cancel()
+        statusMonitorJob?.cancel()
         audioController.release()
      }
 }
