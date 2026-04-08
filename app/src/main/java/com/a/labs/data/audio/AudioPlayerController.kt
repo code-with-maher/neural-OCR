@@ -3,9 +3,11 @@ package com.a.labs.data.audio
 import android.content.ComponentName
 import android.content.Context
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.a.labs.core.AppLogger
 import com.a.labs.data.local.SettingsManager
 import com.a.labs.data.remote.api.ElevenLabsClient
 import com.a.labs.data.remote.api.GeminiTtsClient
@@ -64,33 +66,48 @@ class AudioPlayerController(
                         _duration.value = controller?.duration ?: 0L
                     }
                 }
+                override fun onPlayerError(error: PlaybackException) {
+                    scope.launch {
+                        val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
+                        AppLogger.log(context, isLoggingEnabled, "Media3 Player Error: ${error.message}")
+                    }
+                }
             })
         }, MoreExecutors.directExecutor())
     }
 
     fun playPage(bookId: String, pageNumber: Int) {
         scope.launch {
+            val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
             val page = repository.getPageByNumber(bookId, pageNumber) ?: return@launch
             val engine = settingsManager.ttsEngine.first()
             val apiKeyGemini = settingsManager.geminiKey.first()
             val apiKeyEleven = settingsManager.elevenKey.first()
-            
+
+            AppLogger.log(context, isLoggingEnabled, "محاولة تشغيل الصوت للصفحة $pageNumber باستخدام محرك: $engine")
+
             val audioFile = if (page.audioUri != null && File(page.audioUri).exists()) {
+                AppLogger.log(context, isLoggingEnabled, "تم العثور على ملف صوتي جاهز محلياً.")
                 File(page.audioUri)
             } else {
+                 AppLogger.log(context, isLoggingEnabled, "لا يوجد ملف صوتي، جاري التوليد...")
                 val fileName = "audio_${bookId}_$pageNumber"
                 val result = when (engine) {
                     "ELEVENLABS" -> ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, fileName)
                     "GEMINI_TTS" -> GeminiTtsClient(context, httpClient, apiKeyGemini).generateSpeech(page.markdownContent, fileName)
                     else -> SystemTtsWrapper(context).generateSpeech(page.markdownContent, fileName)
                 }
-                
+
                 val file = result.getOrNull()
                 if (file != null) {
+                    AppLogger.log(context, isLoggingEnabled, "تم توليد الملف الصوتي بنجاح وحفظه.")
                     val updatedPage = page.copy(audioUri = file.absolutePath)
-                     repository.insertPages(listOf(updatedPage))
+                    repository.insertPages(listOf(updatedPage))
                     file
-                } else null
+                } else {
+                    AppLogger.log(context, isLoggingEnabled, "فشل توليد الصوت: ${result.exceptionOrNull()?.localizedMessage}")
+                    null
+                }
             }
 
             audioFile?.let {
@@ -98,6 +115,7 @@ class AudioPlayerController(
                 controller?.setMediaItem(mediaItem)
                 controller?.prepare()
                 controller?.play()
+                AppLogger.log(context, isLoggingEnabled, "تم إرسال الملف إلى مشغل Media3 للبدء.")
             }
         }
     }
