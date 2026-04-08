@@ -83,48 +83,59 @@ class PdfExtractionWorker(
         val userPrompt = context.getString(R.string.user_prompt)
 
         for ((index, chunk) in chunks.withIndex()) {
+            // تجاهل الدفعات المكتملة
             if (chunk.status == "COMPLETED") continue
 
-            updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
-            repository.updateChunkStatus(chunk.id, "PROCESSING", chunk.filesApiUri)
+            try {
+                updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
+                repository.updateChunkStatus(chunk.id, "PROCESSING", chunk.filesApiUri)
 
-            var fileUri = chunk.filesApiUri
-
-            if (fileUri == null) {
-                val fileName = "chunk_${bookId}_${chunk.startPage}.pdf"
-                val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunk.endPage - chunk.startPage, fileName)
-                val chunkFile = chunkResult.getOrNull() ?: return failWithMessage("فشل في تقسيم ملف PDF محلياً")
-
-                val uploadResult =  filesClient.uploadPdfChunk(chunkFile)
-                fileUri = uploadResult.getOrNull()
+                var fileUri = chunk.filesApiUri
 
                 if (fileUri == null) {
+                    val fileName = "chunk_${bookId}_${chunk.startPage}.pdf"
+                    val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunk.endPage - chunk.startPage, fileName)
+                    val chunkFile = chunkResult.getOrNull() ?: throw Exception("فشل في  تقسيم ملف PDF محلياً")
+
+                    val uploadResult = filesClient.uploadPdfChunk(chunkFile)
+                    fileUri = uploadResult.getOrNull()
+
+                    if (fileUri == null) {
+                        chunkFile.delete()
+                        throw Exception("فشل رفع الدفعة إلى خوادم جيميناي. تأكد من جودة الإنترنت.")
+                    }
+
+                    repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri)
                     chunkFile.delete()
-                    return failWithMessage("فشل في رفع الدفعة إلى خوادم Gemini")
                 }
 
-                repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri)
-                chunkFile.delete()
-            }
+                val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
+                val extractedData = ocrResult.getOrNull() ?: throw Exception("فشل استخراج النص من جيميناي. أعد المحاولة.")
 
-            val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
-            val extractedData = ocrResult.getOrNull() ?: return failWithMessage("فشل في استخراج النص، تأكد من جودة الإنترنت")
-
-            val pageEntities = extractedData.pages.map {
-                val finalContent = if (it.markdownContent.trim().isEmpty()) "الصفحة فارغة" else it.markdownContent
-                // الإصلاح الجذري: مطابقة الترقيم القادم من Gemini مع الترقيم الأصلي للكتاب
-                val actualPageNumber = chunk.startPage + it.pageNumber 
+                // الحل الجذري للترقيم: ترتيب الصفحات المستخرجة بحسب رقمها الوهمي القادم من Gemini،
+                // ثم استبداله بترقيم تسلسلي صارم ومبني على موقع الدفعة الفعلي لضمان الترتيب المثالي.
+                val sortedExtractedPages = extractedData.pages.sortedBy { it.pageNumber }
                 
-                PageEntity(
-                    id = UUID.randomUUID().toString(),
-                    bookId = bookId,
-                    pageNumber = actualPageNumber,
-                    markdownContent = finalContent
-                )
-            }
+                val pageEntities = sortedExtractedPages.mapIndexed { i, dto ->
+                    val finalContent = if (dto.markdownContent.trim().isEmpty()) "الصفحة فارغة" else dto.markdownContent
+                    val strictPageNumber = chunk.startPage + 1 + i 
+                    
+                    PageEntity(
+                        id = UUID.randomUUID().toString(),
+                        bookId = bookId,
+                        pageNumber = strictPageNumber,
+                        markdownContent = finalContent
+                    )
+                }
 
-            repository.insertPages(pageEntities)
-            repository.updateChunkStatus(chunk.id, "COMPLETED", fileUri)
+                repository.insertPages(pageEntities)
+                repository.updateChunkStatus(chunk.id, "COMPLETED", fileUri)
+
+            } catch (e: Exception) {
+                // التقاط الخطأ وتحديث الحالة إلى FAILED لكي تظهر واجهة إعادة المحاولة في القارئ
+                repository.updateChunkStatus(chunk.id, "FAILED", chunk.filesApiUri)
+                return failWithMessage(e.localizedMessage ?: "خطأ غير معروف في المعالجة")
+            }
         }
 
         return Result.success()
@@ -140,9 +151,7 @@ class PdfExtractionWorker(
                 channelId,
                 "معالجة الكتب الذكية",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "يظهر أثناء استخراج النصوص من ملفات PDF"
-            }
+            )
             notificationManager.createNotificationChannel(channel)
         }
     }
