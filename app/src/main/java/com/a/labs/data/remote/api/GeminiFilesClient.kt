@@ -10,7 +10,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 
-// كائنات استلام الرد من خوادم الرفع
 @Serializable
 data class FileUploadResponse(
     val file: UploadedFile? = null
@@ -31,16 +30,9 @@ class GeminiFilesClient(
         ignoreUnknownKeys = true
     }
 
-    /**
-     * يقوم برفع ملف PDF مجتزأ إلى مساحة Google Files API
-     * ويعيد الـ URI الخاص به لاستخدامه في طلب الاستخراج.
-     */
     suspend fun uploadPdfChunk(pdfFile: File): Result<String> = withContext(Dispatchers.IO) {
         try {
-            // المسار الرسمي لرفع الملفات
             val url = "https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key=$apiKey"
-
-            // تحويل الملف إلى RequestBody بصيغة PDF
             val mediaType = "application/pdf".toMediaType()
             val requestBody = pdfFile.asRequestBody(mediaType)
 
@@ -50,13 +42,12 @@ class GeminiFilesClient(
                 .build()
 
             val response = client.newCall(request).execute()
-            val responseString = response.body?.string()
+            val responseString = response.body.string()
 
-            if (response.isSuccessful && responseString != null) {
-                // فك تشفير الرد لاستخراج الـ URI
+            if (response.isSuccessful) {
                 val uploadResponse = jsonConfig.decodeFromString<FileUploadResponse>(responseString)
                 val fileUri = uploadResponse.file?.uri
-                
+
                 if (fileUri != null) {
                     Result.success(fileUri)
                 } else {
