@@ -82,8 +82,9 @@ class GeminiTtsClient(
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
             val response = client.newCall(request).execute()
-            val responseString = response.body?.string()
-            if (response.isSuccessful && responseString != null) {
+            val responseString = response.body.string()
+            
+            if (response.isSuccessful) {
                 val ttsResponse = jsonConfig.decodeFromString<TtsResponse>(responseString)
                 val base64Audio = ttsResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.inlineData?.data
                 if (base64Audio != null) {
@@ -92,7 +93,7 @@ class GeminiTtsClient(
                     saveAsWav(audioBytes, outputFile, 24000, 1)
                     Result.success(outputFile)
                 } else Result.failure(Exception("No audio data"))
-            } else Result.failure(Exception("API Error"))
+            } else Result.failure(Exception("API Error: ${response.code}"))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -103,7 +104,7 @@ class GeminiTtsClient(
         val byteRate = sampleRate * channels * 2
         val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
             put("RIFF".toByteArray())
-             putInt(totalDataLen)
+              putInt(totalDataLen)
             put("WAVE".toByteArray())
             put("fmt ".toByteArray())
             putInt(16)
@@ -120,5 +121,5 @@ class GeminiTtsClient(
             output.write(header)
             output.write(pcmData)
         }
-     }
+      }
 }
