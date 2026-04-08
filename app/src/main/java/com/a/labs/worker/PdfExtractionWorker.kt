@@ -11,6 +11,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.a.labs.R
+import com.a.labs.core.AppLogger
 import com.a.labs.data.local.SettingsManager
 import com.a.labs.data.local.room.AppDatabase
 import com.a.labs.data.local.room.entity.ChunkEntity
@@ -31,18 +32,23 @@ class PdfExtractionWorker(
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val channelId = "pdf_extraction_channel"
     private val notificationId = 1001
+    private var isLoggingEnabled = false
 
     override suspend fun doWork(): Result {
         setupNotificationChannel()
         setForeground(createForegroundInfo("جاري التجهيز..."))
 
+        val settings = SettingsManager(context)
+        isLoggingEnabled = settings.isLoggingEnabled.first()
+
         val bookId = inputData.getString("bookId") ?: return failWithMessage("رقم الكتاب مفقود")
         val targetStartPage = inputData.getInt("startPage", 1)
         val targetEndPage = inputData.getInt("endPage", 1)
 
+        AppLogger.log(context, isLoggingEnabled, "بدء عملية الاستخراج للكتاب: $bookId من صفحة $targetStartPage إلى $targetEndPage")
+
         val db = AppDatabase.getDatabase(context)
         val repository = BookRepository(db.bookDao())
-        val settings = SettingsManager(context)
 
         val apiKey = settings.geminiKey.first()
         val modelName = settings.geminiModel.first()
@@ -77,26 +83,31 @@ class PdfExtractionWorker(
                 currentStart = end
             }
             chunks = repository.getChunksForBook(bookId)
+            AppLogger.log(context, isLoggingEnabled, "تم تقسيم الكتاب إلى ${chunks.size} دفعة.")
         }
 
         val systemPrompt = context.getString(R.string.system_prompt)
         val userPrompt = context.getString(R.string.user_prompt)
 
         for ((index, chunk) in chunks.withIndex()) {
-            // تجاهل الدفعات المكتملة
             if (chunk.status == "COMPLETED") continue
 
             try {
-                updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
-                repository.updateChunkStatus(chunk.id, "PROCESSING", chunk.filesApiUri)
+                val progressMsg = "جاري معالجة الدفعة ${index + 1} من ${chunks.size}..."
+                updateNotification(progressMsg)
+                AppLogger.log(context, isLoggingEnabled, progressMsg)
+                
+                 repository.updateChunkStatus(chunk.id, "PROCESSING", chunk.filesApiUri)
 
                 var fileUri = chunk.filesApiUri
 
                 if (fileUri == null) {
+                    AppLogger.log(context, isLoggingEnabled, "تقسيم ملف PDF محلياً للدفعة ${index + 1}")
                     val fileName = "chunk_${bookId}_${chunk.startPage}.pdf"
                     val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunk.endPage - chunk.startPage, fileName)
-                    val chunkFile = chunkResult.getOrNull() ?: throw Exception("فشل في  تقسيم ملف PDF محلياً")
+                    val chunkFile = chunkResult.getOrNull() ?: throw Exception("فشل في تقسيم ملف PDF محلياً")
 
+                    AppLogger.log(context, isLoggingEnabled, "رفع الدفعة إلى خوادم جيميناي...")
                     val uploadResult = filesClient.uploadPdfChunk(chunkFile)
                     fileUri = uploadResult.getOrNull()
 
@@ -105,15 +116,19 @@ class PdfExtractionWorker(
                         throw Exception("فشل رفع الدفعة إلى خوادم جيميناي. تأكد من جودة الإنترنت.")
                     }
 
+                    AppLogger.log(context, isLoggingEnabled, "تم الرفع بنجاح. URI: $fileUri")
                     repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri)
                     chunkFile.delete()
+                } else {
+                    AppLogger.log(context, isLoggingEnabled, "استخدام URI المحفوظ مسبقاً: $fileUri")
                 }
 
+                AppLogger.log(context, isLoggingEnabled, "إرسال طلب الاستخراج لجيميناي...")
                 val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
                 val extractedData = ocrResult.getOrNull() ?: throw Exception("فشل استخراج النص من جيميناي. أعد المحاولة.")
 
-                // الحل الجذري للترقيم: ترتيب الصفحات المستخرجة بحسب رقمها الوهمي القادم من Gemini،
-                // ثم استبداله بترقيم تسلسلي صارم ومبني على موقع الدفعة الفعلي لضمان الترتيب المثالي.
+                AppLogger.log(context, isLoggingEnabled, "تم استلام الرد من جيميناي بنجاح.")
+
                 val sortedExtractedPages = extractedData.pages.sortedBy { it.pageNumber }
                 
                 val pageEntities = sortedExtractedPages.mapIndexed { i, dto ->
@@ -130,18 +145,22 @@ class PdfExtractionWorker(
 
                 repository.insertPages(pageEntities)
                 repository.updateChunkStatus(chunk.id, "COMPLETED", fileUri)
+                AppLogger.log(context, isLoggingEnabled, "اكتملت الدفعة ${index + 1} بنجاح وتم حفظها في قاعدة البيانات.")
 
             } catch (e: Exception) {
-                // التقاط الخطأ وتحديث الحالة إلى FAILED لكي تظهر واجهة إعادة المحاولة في القارئ
+                val errorMsg = e.localizedMessage ?: "خطأ غير معروف في المعالجة"
+                AppLogger.log(context, isLoggingEnabled, "حدث خطأ في الدفعة ${index + 1}: $errorMsg")
                 repository.updateChunkStatus(chunk.id, "FAILED", chunk.filesApiUri)
-                return failWithMessage(e.localizedMessage ?: "خطأ غير معروف في المعالجة")
+                return failWithMessage(errorMsg)
             }
         }
 
+        AppLogger.log(context, isLoggingEnabled, "تم الانتهاء من المعالجة بالكامل بنجاح.")
         return Result.success()
     }
 
-    private fun failWithMessage(msg: String): Result {
+    private suspend fun failWithMessage(msg: String): Result {
+        AppLogger.log(context, isLoggingEnabled, "توقف Worker بسبب: $msg")
         return Result.failure(workDataOf("error" to msg))
     }
 
@@ -159,7 +178,7 @@ class PdfExtractionWorker(
     private fun createForegroundInfo(progressText: String): ForegroundInfo {
         val notification = NotificationCompat.Builder(context, channelId)
             .setContentTitle("ALabs AI")
-            .setContentText(progressText)
+             .setContentText(progressText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setProgress(0, 0, true)
