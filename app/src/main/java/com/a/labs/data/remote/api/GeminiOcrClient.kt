@@ -27,10 +27,12 @@ class GeminiOcrClient(
     private val apiKey: String,
     private val modelName: String
 ) {
+    // جعلنا المحلل متساهلاً جداً ليتجاهل أي حقول إضافية غير متوقعة
     private val jsonConfig = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
         explicitNulls = false
+        isLenient = true
     }
 
     suspend fun extractTextFromPdfUri(
@@ -49,12 +51,8 @@ class GeminiOcrClient(
                         putJsonObject("items") {
                             put("type", "object")
                             putJsonObject("properties") {
-                                putJsonObject("pageNumber") {
-                                    put("type", "integer")
-                                }
-                                putJsonObject("markdownContent") {
-                                    put("type", "string")
-                                }
+                                putJsonObject("pageNumber") { put("type", "integer") }
+                                putJsonObject("markdownContent") { put("type", "string") }
                             }
                             putJsonArray("required") {
                                 add("pageNumber")
@@ -63,15 +61,11 @@ class GeminiOcrClient(
                         }
                     }
                 }
-                putJsonArray("required") {
-                    add("pages")
-                }
+                putJsonArray("required") { add("pages") }
             }
 
             val requestBodyDto = GeminiRequest(
-                systemInstruction = SystemInstruction(
-                    parts = listOf(Part(text = systemPrompt))
-                ),
+                systemInstruction = SystemInstruction(parts = listOf(Part(text = systemPrompt))),
                 contents = listOf(
                     Content(
                         role = "user",
@@ -90,26 +84,24 @@ class GeminiOcrClient(
             val jsonBody = jsonConfig.encodeToString(requestBodyDto)
             val requestBody = jsonBody.toRequestBody("application/json".toMediaType())
 
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
+            val request = Request.Builder().url(url).post(requestBody).build()
             val response = client.newCall(request).execute()
             val responseString = response.body?.string()
 
             if (response.isSuccessful && responseString != null) {
                 val geminiResponse = jsonConfig.decodeFromString<GeminiResponse>(responseString)
-                val rawJsonText =  geminiResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                val rawJsonText = geminiResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 
                 if (rawJsonText != null) {
-                    val ocrResult = jsonConfig.decodeFromString<OcrResultDto>(rawJsonText)
+                    // الحل العبقري: إزالة علامات Markdown التي يضيفها Gemini  أحياناً وتدمر الـ Parser
+                    val cleanJson = rawJsonText.replace(Regex("```json\n?|```"), "").trim()
+                    val ocrResult = jsonConfig.decodeFromString<OcrResultDto>(cleanJson)
                     Result.success(ocrResult)
                 } else {
-                    Result.failure(Exception("Empty content from Gemini API"))
+                    Result.failure(Exception("استجابة Gemini فارغة أو لا تحتوي على نص."))
                 }
             } else {
-                Result.failure(Exception("API Error: ${response.code} - $responseString"))
+                Result.failure(Exception("فشل الاتصال: ${response.code}"))
             }
         } catch (e: Exception) {
             Result.failure(e)
