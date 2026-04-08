@@ -16,7 +16,7 @@ room = "2.8.4"
 work = "2.11.2"
 pdfbox = "2.0.27.0"
 media3 = "1.10.0"
-splashscreen = "1.0.1"
+splashscreen = "1.2.0"
 
 [libraries]
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
