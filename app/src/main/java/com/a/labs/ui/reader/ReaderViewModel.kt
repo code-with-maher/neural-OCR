@@ -1,16 +1,24 @@
 package com.a.labs.ui.reader
 
+import android.content.ContentValues
+import android.content.Context
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.a.labs.data.audio.AudioPlayerController
 import com.a.labs.data.local.room.entity.BookEntity
 import com.a.labs.data.local.room.entity.PageEntity
 import com.a.labs.data.repository.BookRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileInputStream
 
 class ReaderViewModel(
     private val repository: BookRepository,
@@ -29,7 +37,11 @@ class ReaderViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _toastMessage = MutableStateFlow<String?>(null)
+    val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+
     fun clearError() { _errorMessage.value = null }
+    fun clearToast() { _toastMessage.value = null }
 
     fun loadBook(bookId: String) {
         viewModelScope.launch {
@@ -38,8 +50,6 @@ class ReaderViewModel(
                 _currentBook.value = book
                 book?.let { b ->
                     _currentPageNumber.value = b.lastReadPage
-                    
-                    // الحل العبقري: مراقبة قاعدة البيانات باستمرار، بمجرد أن ينهي جيميناي الحفظ ستتحدث الواجهة فوراً!
                     viewModelScope.launch {
                         repository.getPagesForBook(b.id).collect { pages ->
                             _currentPageData.value = pages.find { it.pageNumber == _currentPageNumber.value }
@@ -80,14 +90,62 @@ class ReaderViewModel(
     fun playAudio() {
         val book = _currentBook.value ?: return
         if (_currentPageData.value == null) {
-            _errorMessage.value = "النص غير جاهز بعد. يرجى انتظار معالجة الذكاء الاصطناعي."
+            _errorMessage.value = "النص غير جاهز بعد. يرجى انتظار المعالجة."
             return
         }
         audioController.playPage(book.id, _currentPageNumber.value)
     }
 
+    fun deleteCurrentBook(onDeleted: () -> Unit) {
+        viewModelScope.launch {
+            _currentBook.value?.let { book ->
+                repository.deleteBook(book.id)
+                onDeleted()
+            }
+        }
+    }
+
+    fun exportCurrentAudio(context: Context) {
+        val audioPath = _currentPageData.value?.audioUri
+        if (audioPath == null || !File(audioPath).exists()) {
+             _toastMessage.value = "يجب تشغيل الصوت أولاً لتوليده قبل تحميله."
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = File(audioPath)
+                val bookTitle = _currentBook.value?.title ?: "book"
+                val pageNum = _currentPageNumber.value
+                val fileName = "${bookTitle}_page_$pageNum.wav"
+
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { outputStream ->
+                        FileInputStream(file).use { inputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                    _toastMessage.value = "تم حفظ الملف الصوتي في التنزيلات."
+                } else {
+                    _toastMessage.value = "فشل في حفظ الملف الصوتي."
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "حدث خطأ أثناء الحفظ."
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         audioController.release()
-    }
+     }
 }
