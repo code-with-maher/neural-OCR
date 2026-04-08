@@ -1,6 +1,7 @@
 package com.a.labs.data.remote.api
 
 import android.content.Context
+import com.a.labs.core.GeminiModels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -69,7 +70,8 @@ class GeminiTtsClient(
 
     suspend fun generateSpeech(text: String, fileName: String, voiceName: String = "Aoede"): Result<File> = withContext(Dispatchers.IO) {
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=$apiKey"
+            // استخدام النموذج الصحيح من ملف الكتالوج
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/${GeminiModels.TTS_MODEL}:generateContent?key=$apiKey"
             val requestBodyDto = TtsRequest(
                 contents = listOf(TtsContent(listOf(TtsPart(text)))),
                 generationConfig = TtsGenerationConfig(
@@ -102,9 +104,9 @@ class GeminiTtsClient(
     private fun saveAsWav(pcmData: ByteArray, file: File, sampleRate: Int, channels: Int) {
         val totalDataLen = pcmData.size + 36
         val byteRate = sampleRate * channels * 2
-        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+        val header =  ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
             put("RIFF".toByteArray())
-              putInt(totalDataLen)
+             putInt(totalDataLen)
             put("WAVE".toByteArray())
             put("fmt ".toByteArray())
             putInt(16)
