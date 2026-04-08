@@ -47,33 +47,14 @@ class PdfExtractionWorker(
             val targetStartPage = inputData.getInt("startPage", 1)
             val targetEndPage = inputData.getInt("endPage", 1)
 
-            AppLogger.log(context, isLoggingEnabled, "بدء الاستخراج للكتاب: $bookId من صفحة $targetStartPage إلى $targetEndPage")
+            AppLogger.log(context, isLoggingEnabled, "بدء الاستخراج: $bookId من $targetStartPage إلى $targetEndPage")
 
             val db = AppDatabase.getDatabase(context)
             val repository = BookRepository(db.bookDao())
-
-            val apiKey = settings.geminiKey.first()
-            val modelName = settings.geminiModel.first()
             val chunkSizeValue = settings.chunkSize.first()
 
-            if (apiKey.isBlank()) return failWithMessage("مفتاح Gemini API مفقود.")
-
-            val book = repository.getBookById(bookId) ?: return failWithMessage("الكتاب غير موجود في السجلات.")
-            val sourceUri = Uri.parse(book.sourcePdfUri)
-
-            // حل مشكلة الـ Timeout: إعطاء مهلة دقيقتين لتجنب فشل الدفعات الكبيرة
-            val httpClient = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
-                .build()
-
-            val chunker = PdfChunkerUseCase(context)
-            val filesClient = GeminiFilesClient(httpClient, apiKey)
-            val ocrClient = GeminiOcrClient(httpClient, apiKey, modelName)
-
+            // 1. إنشاء الدفعات فوراً لتفعيل شاشة المراقبة وزر إعادة المحاولة في حال فشل المفتاح
             var chunks = repository.getChunksForBook(bookId)
-
             if (chunks.isEmpty()) {
                 var currentStart = targetStartPage - 1 
                 val finalEnd = targetEndPage 
@@ -91,93 +72,107 @@ class PdfExtractionWorker(
                     currentStart = end
                 }
                 chunks = repository.getChunksForBook(bookId)
-                AppLogger.log(context, isLoggingEnabled, "تم تقسيم الكتاب إلى ${chunks.size} دفعة.")
             }
 
-            val systemPrompt =  context.getString(R.string.system_prompt)
+            // 2. التحقق من مفتاح الـ API بعد إنشاء الدفعات
+            val apiKey = settings.geminiKey.first()
+            if (apiKey.isBlank()) {
+                chunks.forEach { repository.updateChunkStatus(it.id, "FAILED", it.filesApiUri) }
+                return failWithMessage("مفتاح Gemini مفقود، يرجى إضافته من الإعدادات.")
+            }
+
+            val modelName = settings.geminiModel.first()
+            val book = repository.getBookById(bookId) ?: return failWithMessage("الكتاب غير موجود.")
+            val sourceUri = Uri.parse(book.sourcePdfUri)
+
+            // رفع المهلة لـ 15 دقيقة لاستيعاب الدفعات الكبيرة والردود البطيئة
+            val httpClient = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.MINUTES)
+                .readTimeout(15, TimeUnit.MINUTES)
+                .writeTimeout(15, TimeUnit.MINUTES)
+                .build()
+
+            val chunker = PdfChunkerUseCase(context)
+            val filesClient =  GeminiFilesClient(httpClient, apiKey)
+            val ocrClient = GeminiOcrClient(httpClient, apiKey, modelName)
+
+            val systemPrompt = context.getString(R.string.system_prompt)
             val userPrompt = context.getString(R.string.user_prompt)
 
             for ((index, chunk) in chunks.withIndex()) {
                 if (chunk.status == "COMPLETED") continue
 
                 try {
-                    val progressMsg = "جاري معالجة الدفعة ${index + 1} من ${chunks.size}..."
-                    updateNotification(progressMsg)
-                    AppLogger.log(context, isLoggingEnabled, progressMsg)
-                    
+                    updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
                     repository.updateChunkStatus(chunk.id, "PROCESSING", chunk.filesApiUri)
                     var fileUri = chunk.filesApiUri
 
                     if (fileUri == null) {
-                        AppLogger.log(context, isLoggingEnabled, "تقسيم ملف PDF محلياً...")
                         val fileName = "chunk_${bookId}_${chunk.startPage}.pdf"
                         val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunk.endPage - chunk.startPage, fileName)
-                        val chunkFile = chunkResult.getOrNull() ?: throw Exception("فشل في التقسيم المحلي.")
+                        val chunkFile = chunkResult.getOrNull() ?: throw Exception("فشل في تقسيم PDF محلياً.")
 
-                        AppLogger.log(context, isLoggingEnabled, "رفع الدفعة إلى خوادم جيميناي...")
                         val uploadResult = filesClient.uploadPdfChunk(chunkFile)
                         fileUri = uploadResult.getOrNull()
 
                         if (fileUri == null) {
                             chunkFile.delete()
-                            throw Exception("فشل الرفع لجيميناي. تأكد من الإنترنت.")
+                            throw Exception("فشل الرفع. تأكد من الإنترنت.")
                         }
 
-                        AppLogger.log(context, isLoggingEnabled, "تم الرفع بنجاح. URI: $fileUri")
                         repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri)
                         chunkFile.delete()
-                    } else {
-                        AppLogger.log(context, isLoggingEnabled, "استخدام URI محفوظ مسبقاً: $fileUri")
                     }
 
-                    AppLogger.log(context, isLoggingEnabled, "إرسال طلب الاستخراج (OCR)...")
                     val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
                     
                     if (ocrResult.isFailure) {
-                        throw Exception("فشل الاستخراج من جيميناي: ${ocrResult.exceptionOrNull()?.message}")
+                        throw ocrResult.exceptionOrNull() ?: Exception("خطأ غير معروف من جيميناي")
                     }
                     
                     val extractedData = ocrResult.getOrNull() ?: throw Exception("استجابة جيميناي فارغة.")
-                    AppLogger.log(context, isLoggingEnabled, "تم استلام الرد بنجاح.")
 
                     val sortedExtractedPages = extractedData.pages.sortedBy { it.pageNumber }
                     val pageEntities = sortedExtractedPages.mapIndexed { i, dto ->
-                        val finalContent = if (dto.markdownContent.trim().isEmpty()) "الصفحة فارغة" else dto.markdownContent
                         val strictPageNumber = chunk.startPage + 1 + i 
                         PageEntity(
                             id = UUID.randomUUID().toString(),
                             bookId = bookId,
                             pageNumber = strictPageNumber,
-                            markdownContent = finalContent
+                            markdownContent = if (dto.markdownContent.trim().isEmpty()) "الصفحة فارغة" else dto.markdownContent
                         )
                     }
 
                     repository.insertPages(pageEntities)
                     repository.updateChunkStatus(chunk.id, "COMPLETED", fileUri)
-                    AppLogger.log(context, isLoggingEnabled, "اكتملت الدفعة ${index + 1}.")
 
                 } catch (e: Exception) {
-                    val errorMsg = e.message ?: "خطأ غير معروف"
-                    AppLogger.log(context, isLoggingEnabled, "حدث خطأ بالدفعة ${index + 1}:\n$errorMsg\n${e.stackTraceToString()}")
+                    val errorString = e.message ?: ""
+                    val friendlyError = when {
+                        errorString.contains("503") -> "خوادم الذكاء الاصطناعي عليها ضغط هائل حالياً. يرجى تغيير النموذج من الإعدادات أو إعادة المحاولة."
+                        errorString.contains("404") -> "النموذج المختار غير مدعوم، يرجى تغييره من الإعدادات."
+                        errorString.contains("timeout", ignoreCase = true) -> "انتهى وقت الاتصال (Timeout). يرجى التأكد من سرعة الإنترنت."
+                        else -> "حدث خطأ غير متوقع: $errorString"
+                    }
+
+                    AppLogger.log(context, isLoggingEnabled, "خطأ بالدفعة ${index + 1}:\n$friendlyError\n${e.stackTraceToString()}")
                     repository.updateChunkStatus(chunk.id, "FAILED", chunk.filesApiUri)
-                    return failWithMessage("خطأ في الدفعة ${index + 1}: $errorMsg")
+                    return failWithMessage(friendlyError)
                 }
             }
 
-            AppLogger.log(context, isLoggingEnabled, "تمت المعالجة بالكامل بنجاح.")
-             notificationManager.cancel(notificationId) // إخفاء الإشعار
+            notificationManager.cancel(notificationId)
             return Result.success()
 
         } catch (e: Exception) {
             val fatalMsg = e.message ?: "خطأ فادح"
-            AppLogger.log(context, isLoggingEnabled, "فشل ذريع بالوركر:\n$fatalMsg\n${e.stackTraceToString()}")
             return failWithMessage(fatalMsg)
         }
     }
 
     private suspend fun failWithMessage(msg: String): Result {
-        notificationManager.cancel(notificationId) // حل جذري: إخفاء الإشعار عند الفشل
-        AppLogger.log(context, isLoggingEnabled, "توقف Worker بسبب: $msg")
+        notificationManager.cancel(notificationId)
+         AppLogger.log(context, isLoggingEnabled, "توقف Worker بسبب: $msg")
         return Result.failure(workDataOf("error" to msg))
     }
 
