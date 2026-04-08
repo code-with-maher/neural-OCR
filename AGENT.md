@@ -1,69 +1,81 @@
-# 🤖 AI Agent Context File (AGENT.md)
-**Project Name:** ALabs (Smart OCR & TTS Audio Reader)
-**Package Name:** `com.a.labs`
-**Language:** Kotlin (2.3.20) | **UI:** Jetpack Compose (No XML Views)
-**Architecture:** MVI/MVVM with strict Single Responsibility & Modularity.
+# ALabs - Smart Audio Library (مكتبة الكتب الصوتية الذكية)
 
-## ⚠️ القواعد الذهبية للوكيل (Golden Rules for AI Agent)
-1. **لا تعليقات داخل الكود (No Inline Comments):** الكود يجب أن يشرح نفسه (Self-documenting). ممنوع كتابة تعليقات داخل دوال أو ملفات الكوتلن.
-2. **أحدث التقنيات (Bleeding Edge):** استخدم دائماً أحدث ممارسات Compose و Kotlin (مثلاً `kotlinx.serialization` بدلاً من `Gson`).
-3. **فصل المسؤوليات (Modularity):** كل كلاس، واجهة، أو وظيفة يجب أن تكون في ملفها الخاص ومسارها المستقل. لا تدمج شاشتين أو وظيفتين في ملف واحد.
-4. **التوافقية (Accessibility - A11y):** التطبيق موجه لخدمة المكفوفين ومستخدمي قارئات الشاشة (TalkBack). كل عنصر UI يجب أن يدعم الـ Semantics والـ Content Description الديناميكي.
+## 📌 نظرة عامة على المشروع (Overview)
+تطبيق أندرويد متطور يعتمد على المعمارية النظيفة (Clean Architecture) وتقنية MVVM، مخصص لتحويل ملفات PDF الممسوحة ضوئياً أو النصية إلى كتب صوتية وتفاعلية. يعتمد التطبيق على تقنيات الذكاء الاصطناعي (Gemini Vision OCR & TTS) لاستخراج النصوص وتوليد الصوت، مع دعم لمحركات صوتية متعددة (System TTS, ElevenLabs, Gemini TTS).
 
 ---
 
-## 📂 المرحلة الحالية: الملفات المنجزة (Current State & Existing Files)
-هذه الملفات تم إنشاؤها بالفعل وتعمل بنجاح. **لا تقم بإعادة إنشائها أو تعديلها إلا إذا طُلب منك ذلك صراحة:**
-
-### 1. إعدادات البناء والبيئة (Build & Config)
-- `/.github/workflows/build.yml`: ملف CI/CD باستخدام GitHub Actions لبناء نسخة Release (APK) وإرسالها عبر Telegram باستخدام سكربت بايثون.
-- `/build.gradle.kts` (Root): ملف الجريدل الأساسي (يحتوي فقط على الـ Plugins Alias).
-- `/settings.gradle.kts`: إدارة المستودعات (Repositories) وإعدادات الـ Resolution.
-- `/gradle.properties`: إعدادات الـ JVM (مخصص بـ 4GB RAM) وتفعيل الكاش و R8 Full Mode.
-- `/gradle/libs.versions.toml`: الكتالوج (Version Catalog) الذي يحتوي على جميع إصدارات المكتبات (AGP 9.1.0, Compose BOM 2026.03.01, OkHttp 5.3.2).
-- `/app/build.gradle.kts`: إعدادات موديول التطبيق، `minSdk 28`، تفعيل Compose، وربط المكتبات (ملاحظة: سيتم استبدال `Gson` بـ `kotlinx.serialization` لاحقاً).
-- `/app/proguard-rules.pro`: قواعد ضغط الكود. تم تنظيفه من ملفات البايندينج، وتمت حماية كلاسات `OkHttp` و `Kotlin Metadata`.
-
-### 2. الكود المصدري (Source Code)
-- `/app/src/main/AndroidManifest.xml`: المانيفيست المنظف. يحتوي على أذونات الإنترنت وقراءة الوسائط، ويستخدم ثيم `Theme.Material.Light.NoActionBar` كجسر مؤقت للإقلاع بدون شريط علوي. (تم حذف `colors.xml` و `styles.xml` نهائياً).
-
-**المسار الأساسي:** `/app/src/main/java/com/a/labs/`
-- `core/GeminiModels.kt`: (Object) يحتوي على ثوابت بأسماء نماذج Gemini المدعومة (`FLASH_3_1_LITE`, `FLASH_3_0`, `FLASH_2_5`).
-- `data/local/SettingsManager.kt`: كلاس يدير تفضيلات المستخدم باستخدام `DataStore`. يحتوي على `Flow` لجلب وحفظ: مفتاح Gemini، مفتاح ElevenLabs، محرك הـ TTS المختار، ونموذج Gemini المفضل.
-- `ui/settings/SettingsScreen.kt`: شاشة Compose تعتمد على `SettingsManager`. تحتوي على حقول إدخال مفاتيح الـ API، وقوائم منسدلة (DropdownMenu) لاختيار محرك النطق ونموذج الذكاء الاصطناعي.
+## 🏗️ المعمارية والتقنيات المستخدمة (Tech Stack)
+* **واجهة المستخدم:** Jetpack Compose (100% Declarative UI).
+* **المعمارية:** MVVM (Model-View-ViewModel).
+* **إدارة الحالات المتزامنة:** Kotlin Coroutines & StateFlow.
+* **قاعدة البيانات:** Room Database للمحافظة على حالة الكتب والصفحات المجزأة.
+* **العمليات في الخلفية:** WorkManager (Foreground Services) لضمان عدم توقف معالجة PDF.
+* **الشبكات:** OkHttp3 (مع مهلة مخصصة Timeout 15m).
+* **إدارة الوسائط:** AndroidX Media3 (ExoPlayer) للتشغيل في الخلفية.
 
 ---
 
-## 🏗️ خارطة الطريق: الملفات المخطط إنشاؤها (Planned Architecture & Future Files)
-هذه الملفات والمسارات سيتم إنشاؤها في الجلسات القادمة. يجب على الوكيل (AI) الالتزام بهذه الهيكلة عند كتابة الأكواد:
+## 📂 هيكل الملفات وتدفق العمل (Project Structure)
 
-### 1. التصميم والملاحة (Theme & Navigation)
-- `ui/theme/Theme.kt`: الثيم الأساسي لـ Compose.
-- `ui/theme/Color.kt` & `ui/theme/Type.kt`: الألوان والخطوط.
-- `ui/navigation/NavGraph.kt`: لإدارة التنقل بين الشاشات (`LibraryScreen`, `ReaderScreen`, `SettingsScreen`).
+### 1. طبقة الأساسيات (Core & Domain)
+* `app/src/main/java/com/a/labs/core/GeminiModels.kt`: يحتوي على ثوابت أسماء نماذج الذكاء الاصطناعي المعتمدة.
+* `app/src/main/java/com/a/labs/core/AppLogger.kt`: نظام تسجيل أحداث محلي (Local Logger) يُستخدم في "وضع المطور" لحفظ الأخطاء وتتبع العمليات في ملف نصي.
+* `app/src/main/java/com/a/labs/domain/usecase/PdfChunkerUseCase.kt`: مسؤول عن قراءة ملف الـ PDF الأصلي، وتجزئته (Chunking) إلى ملفات PDF صغيرة بناءً على النطاق المحدد.
 
-### 2. واجهات المستخدم الأساسية (Core UI Screens)
-- `ui/library/LibraryScreen.kt`: الشاشة الرئيسية. تعرض قائمة الكتب المحفوظة. تحتوي على زر (إضافة كتاب PDF) عبر `Storage Access Framework`.
-- `ui/reader/ReaderScreen.kt`: شاشة قراءة الكتاب. يتم عرض النص فيها كـ `LazyColumn` مقسم لفقرات لدعم `TalkBack`. تحتوي على أزرار تحكم بالصوت (سابق، تالي، تشغيل، ترجيع) وقائمة خيارات (ترجمة، تحويل لصوت).
+### 2. طبقة قواعد البيانات (Local Data)
+* `app/src/main/java/com/a/labs/data/local/SettingsManager.kt`: يستخدم `DataStore` لحفظ مفاتيح الـ API، وإعدادات المستخدم (حجم الدفعة، وضع المطور).
+* `app/src/main/java/com/a/labs/data/local/room/AppDatabase.kt`: إعداد قاعدة بيانات Room.
+* `app/src/main/java/com/a/labs/data/local/room/dao/BookDao.kt`: واجهة الوصول للبيانات (Insert, Query, Update).
+* `app/src/main/java/com/a/labs/data/local/room/entity/BookEntity.kt`: يمثل الكتاب العام.
+* `app/src/main/java/com/a/labs/data/local/room/entity/ChunkEntity.kt`: يمثل الدفعات (نطاق الصفحات وحالة معالجتها PENDING, PROCESSING, COMPLETED, FAILED).
+* `app/src/main/java/com/a/labs/data/local/room/entity/PageEntity.kt`: يمثل كل صفحة بنصها المستخرج (Markdown) ومسار ملفها الصوتي.
 
-### 3. قاعدة البيانات المحلية (Local Database - Room)
-- `data/local/room/AppDatabase.kt`: إعداد قاعدة البيانات.
-- `data/local/room/dao/BookDao.kt`: استعلامات الكتب وحالة الدفعات (Chunks).
-- `data/local/room/entity/BookEntity.kt` & `ChunkEntity.kt`: جداول تمثل الكتاب، دفعات الـ PDF المقطوعة، والـ `Files API URI` الخاص بكل دفعة لضمان عدم  ضياعها.
+### 3. طبقة الشبكات (Remote Data / API Clients)
+* `app/src/main/java/com/a/labs/data/remote/api/GeminiFilesClient.kt`: لرفع دفعات الـ PDF المقطوعة إلى خوادم جوجل للحصول على URI.
+* `app/src/main/java/com/a/labs/data/remote/api/GeminiOcrClient.kt`: يقوم بإرسال الـ URI مع الأوامر (Prompts) واستخراج الرد بصيغة JSON مرنة جداً.
+* `app/src/main/java/com/a/labs/data/remote/api/GeminiTtsClient.kt` & `ElevenLabsClient.kt`: عملاء لتوليد الملفات الصوتية وحفظها محلياً.
+* `app/src/main/java/com/a/labs/data/remote/dto/...`: ملفات Data Transfer Objects (DTOs) للتعامل مع الـ JSON.
 
-### 4. العمليات الخلفية (Background Processing - WorkManager)
-- `worker/PdfProcessorWorker.kt`: يقوم بتقسيم ملف الـ PDF عبر مكتبة `PdfBox-Android` إلى دفعات (15 صفحة افتراضياً).
-- `worker/GeminiUploadWorker.kt`: يرفع الدفعات إلى `Google Files API` ويحفظ الـ URI في قاعدة البيانات المحلية.
-- `worker/AudioGenerationWorker.kt`: يتصل بـ (ElevenLabs / Gemini TTS) لتحويل النصوص إلى ملفات صوتية وحفظها في التخزين المحلي.
+### 4. طبقة معالجة الصوت والخدمات (Audio & Workers)
+* `app/src/main/java/com/a/labs/data/audio/SystemTtsWrapper.kt`: يغلف محرك نطق النظام ويعمل كـ Stream فوري (لا يحفظ ملفات).
+* `app/src/main/java/com/a/labs/data/audio/AudioPlayerController.kt`: المتحكم الرئيسي بالصوت، يربط بين Media3، الواجهة، والـ API.
+* `app/src/main/java/com/a/labs/worker/PdfExtractionWorker.kt`: العامل المتزامن الذي يعمل كـ Foreground Service ويقود عملية (التقسيم -> الرفع -> الاستخراج -> الحفظ).
+* `app/src/main/java/com/a/labs/worker/PlaybackService.kt`: خدمة MediaSessionService لتشغيل الصوت في الخلفية.
 
-### 5. الشبكات ومعالجة الذكاء الاصطناعي (Network & AI Domain)
-- `data/remote/api/FilesApi.kt`: للتعامل مع مساحة تخزين جوجل المؤقتة.
-- `data/remote/api/GeminiApi.kt`: لإرسال الـ URI + `System Prompt` وطلب `JSON Structured Output` (ماركداون).
-- `domain/usecase/SmartChunkingUseCase.kt`: خوارزمية ذكية لتقسيم النصوص الكبيرة قبل إرسالها للـ TTS بناءً على أقرب علامة ترقيم (نقطة، فاصلة) لتجنب القطع العشوائي للكلمات.
+### 5. طبقة واجهة المستخدم (UI & ViewModels)
+* `app/src/main/java/com/a/labs/ui/library/LibraryScreen.kt` & `LibraryViewModel.kt`: شاشة الإضافة وتحديد نطاق المعالجة.
+* `app/src/main/java/com/a/labs/ui/reader/ReaderScreen.kt` & `ReaderViewModel.kt`: شاشة القراءة التفاعلية، تراقب قاعدة البيانات، وتتحكم بالصوت.
+* `app/src/main/java/com/a/labs/ui/settings/SettingsScreen.kt` & `LogsScreen.kt`: إعدادات التطبيق، إدخال المفاتيح، وعرض السجلات للمطورين.
 
 ---
 
-## ⚙️ آليات العمل الجوهرية (Core Workflows to strictly follow)
-1. **معالجة الـ PDF بدلاً من الرندرة:** لا نستخدم `PdfRenderer` لتجنب استهلاك الرام (لا نحول PDF لصور). نستخدم `PdfBox` لاقتطاع ملف PDF أصغر، ثم نرفعه لـ Files API، ثم نرسل الـ URI لـ Gemini.
-2. **مرونة الأخطاء (Resilience):** أي عملية شبكية فاشلة لا تعيد العملية من الصفر. الـ Worker يجب أن يقرأ الـ URI المحفوظ في الـ `Room DB` ويكمل المحاولة من حيث توقف.
-3. **هندسة الأوامر (Prompting):** في طلب Gemini، يجب إرشاد النموذج إلى (تجاهل التذييل وأرقام الصفحات)، وصف الصور كـ Text، وترجمة النصوص إلى العربية إذا تم تفعيل ميزة "الترجمة الفورية" من  الإعدادات.
+## 🔄 كيف تعمل تدفقات البيانات (Data Flow)?
+1. المستخدم يختار PDF. الـ `LibraryViewModel` ينسخه محلياً لتجنب فقدان الصلاحية.
+2. يُسأل المستخدم عن "نطاق الصفحات"  (مثلاً 1 إلى 20).
+3. يتم إطلاق `PdfExtractionWorker` كخدمة أمامية مع إشعار دائم.
+4. الوركر يقوم بإنشاء سجلات الـ `ChunkEntity` (الدفعات) في قاعدة البيانات فوراً بحالة `PENDING`.
+5. الواجهة (`ReaderScreen`) تفتح فوراً وتراقب حالة هذه الدفعات.
+6. الوركر يبدأ: التقسيم محلياً -> الرفع لـ Gemini Files -> طلب الـ OCR -> حفظ الصفحات في `PageEntity`.
+7. بمجرد ظهور `PageEntity`، الواجهة تتحدث تلقائياً (Reactive UI).
+8. عند ضغط تشغيل الصوت، `AudioPlayerController` يولد الصوت في الـ Background (أو يقرأه عبر النظام فوراً) ويرسله لـ `Media3`.
+
+---
+
+## 🔥 التعديلات الأخيرة (Recent Modifications - v1.1.0)
+تم إجراء تعديلات جراحية عميقة لحل مشاكل الاتصال والتزامن:
+
+1. **معالجة مشاكل Timeout (المهلة الزمنية):**
+   * تم رفع المهلة الزمنية لـ `OkHttpClient` في الـ `PdfExtractionWorker` و `AudioPlayerController` إلى **15 دقيقة** لتجنب فشل جيميناي مع الدفعات الكبيرة.
+2. **الاستجابة التفاعلية للأخطاء (Reactive Error Handling):**
+   * تعديل `PdfExtractionWorker` ليقوم بتقسيم الدفعات (Chunks) وإدراجها في قاعدة البيانات **قبل** التحقق من مفتاح الـ API والاتصال بالشبكة. 
+   * في حال الفشل (بسبب انقطاع الإنترنت أو نقص المفتاح)، تتحول حالة الـ Chunk إلى `FAILED`.
+   * الـ `ReaderViewModel` يراقب هذه الحالة عبر `statusMonitorJob`، مما يظهر زر **"إعادة المحاولة"** (Retry) للمستخدم فوراً لتشغيل الوركر مرة أخرى من حيث توقف.
+3. **التشغيل المستقل بالخلفية (Background Audio Scope):**
+   * تم نقل عمليات توليد الصوت في `AudioPlayerController` إلى `CoroutineScope(Dispatchers.IO + SupervisorJob())`. هذا يضمن عدم تدمير طلب توليد الصوت إذا قام المستخدم بإغلاق شاشة القارئ.
+4. **محرك النظام الفوري (System TTS Streaming):**
+   * تم تحويل `SystemTtsWrapper` للعمل بطريقة البث المباشر الفوري (Real-time). لم يعد يحفظ ملفات `Wav`، بل يقرأ النص مباشرة، وتم تعطيل زر "تصدير الصوت" برمجياً إذا كان المحرك المستخدم هو النظام.
+5. **ترجمة رموز الخطأ (Error Translation):**
+   * التقاط خطأ جيميناي `503` (Server Overload) و `404` وترجمتها إلى نصوص واضحة للمستخدم تقترح "تغيير النموذج" أو "المحاولة لاحقاً".
+6. **تصحيح النماذج (Model Naming Fix):**
+   * تحديث أسماء النماذج في `GeminiModels.kt` لتتطابق بدقة مع توثيق جوجل (مثل `gemini-3-flash-preview` و  `gemini-2.5-flash-preview-tts`).
