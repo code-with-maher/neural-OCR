@@ -17,8 +17,9 @@ class SystemTtsWrapper(private val context: Context) {
 
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // محاولة تعيين اللغة العربية إن أمكن
-                val arabicLocale = Locale("ar")
+                // استخدام Builder بدلاً من الـ Constructor القديم
+                val arabicLocale = Locale.Builder().setLanguage("ar").build()
+                
                 if (tts?.isLanguageAvailable(arabicLocale) ?: -1 >= TextToSpeech.LANG_AVAILABLE) {
                     tts?.language = arabicLocale
                 } else {
@@ -33,16 +34,12 @@ class SystemTtsWrapper(private val context: Context) {
                     override fun onDone(utteranceId: String?) {
                         tts?.stop()
                         tts?.shutdown()
-                        if (continuation.isActive) {
-                            continuation.resume(Result.success(outputFile))
-                        }
+                        if (continuation.isActive) continuation.resume(Result.success(outputFile))
                     }
                     override fun onError(utteranceId: String?) {
                         tts?.stop()
                         tts?.shutdown()
-                        if (continuation.isActive) {
-                            continuation.resume(Result.failure(Exception("System TTS Error")))
-                        }
+                        if (continuation.isActive) continuation.resume(Result.failure(Exception("System TTS Error")))
                     }
                 })
 
@@ -52,9 +49,7 @@ class SystemTtsWrapper(private val context: Context) {
                     if (continuation.isActive) continuation.resume(Result.failure(Exception("Failed to start synthesis")))
                 }
             } else {
-                if (continuation.isActive) {
-                    continuation.resume(Result.failure(Exception("TTS Initialization Failed")))
-                }
+                if (continuation.isActive) continuation.resume(Result.failure(Exception("TTS Initialization Failed")))
             }
         }
 
