@@ -18,6 +18,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,16 +47,25 @@ class AudioPlayerController(
     val duration: StateFlow<Long> = _duration.asStateFlow()
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
+    // نطاق منفصل يضمن عدم موت طلب التوليد إذا خرج المستخدم من الشاشة
+    private val generationScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var progressJob: Job? = null
     
     private var loadedBookId: String? = null
     private var loadedPageNum: Int = -1
+    private var currentEngine: String = "SYSTEM"
 
-    // حل مشكلة الـ Timeout: زيادة وقت الانتظار لدقيقتين لتجنب فشل Gemini TTS
+    private val systemTts = SystemTtsWrapper(context).apply {
+        onPlaybackStateChanged = { playing ->
+            _isPlaying.value = playing
+        }
+    }
+
+    // رفع المهلة لـ 15 دقيقة
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.MINUTES)
+        .readTimeout(15, TimeUnit.MINUTES)
+        .writeTimeout(15, TimeUnit.MINUTES)
         .build()
 
     init {
@@ -68,20 +78,21 @@ class AudioPlayerController(
         controllerFuture?.addListener({
             controller?.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    _isPlaying.value = isPlaying
-                    if (isPlaying) startProgressUpdate() else stopProgressUpdate()
+                    if (currentEngine != "SYSTEM") {
+                        _isPlaying.value = isPlaying
+                        if (isPlaying) startProgressUpdate() else stopProgressUpdate()
+                    }
                 }
                 override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_READY) {
-                        _duration.value = controller?.duration ?: 0L
-                    } else if (state == Player.STATE_ENDED) {
-                        _isPlaying.value = false
+                    if (currentEngine != "SYSTEM") {
+                        if (state == Player.STATE_READY) _duration.value = controller?.duration ?: 0L
+                        else if (state == Player.STATE_ENDED) _isPlaying.value = false
                     }
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     scope.launch {
                         val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
-                        AppLogger.log(context, isLoggingEnabled, "Media3 Player Error: ${error.message} - ${error.errorCodeName}")
+                        AppLogger.log(context, isLoggingEnabled, "Media3 Error:  ${error.message}")
                     }
                 }
             })
@@ -89,72 +100,87 @@ class AudioPlayerController(
     }
 
     fun playPage(bookId: String, pageNumber: Int) {
-        // الحل العبقري لمشكلة إعادة التشغيل: إذا كانت نفس الصفحة محملة مسبقاً، نكتفي بالتبديل
-        if (loadedBookId == bookId && loadedPageNum == pageNumber && (controller?.mediaItemCount ?: 0) > 0) {
-            togglePlay()
-             return
-        }
+        generationScope.launch {
+            val engine = settingsManager.ttsEngine.first()
+            currentEngine = engine
 
-        loadedBookId = bookId
-        loadedPageNum = pageNumber
+            if (loadedBookId == bookId && loadedPageNum == pageNumber) {
+                togglePlay()
+                return@launch
+            }
 
-        scope.launch {
+            loadedBookId = bookId
+            loadedPageNum = pageNumber
             val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
             val page = repository.getPageByNumber(bookId, pageNumber) ?: return@launch
-            val engine = settingsManager.ttsEngine.first()
-            val apiKeyGemini = settingsManager.geminiKey.first()
-            val apiKeyEleven = settingsManager.elevenKey.first()
 
-            AppLogger.log(context, isLoggingEnabled, "محاولة إعداد الصوت للصفحة $pageNumber باستخدام محرك: $engine")
+            if (engine == "SYSTEM") {
+                scope.launch(Dispatchers.Main) { controller?.pause() }
+                systemTts.speak(page.markdownContent)
+                AppLogger.log(context, isLoggingEnabled, "بدء القراءة الفورية عبر System TTS")
+                return@launch
+            }
+
+            systemTts.stop()
 
             val audioFile = if (page.audioUri != null && File(page.audioUri).exists()) {
-                AppLogger.log(context, isLoggingEnabled, "تم العثور على ملف صوتي محلي: ${page.audioUri}")
                 File(page.audioUri)
             } else {
-                AppLogger.log(context, isLoggingEnabled, "جاري التوليد الصوتي عبر الشبكة...")
+                AppLogger.log(context, isLoggingEnabled, "جاري طلب الصوت من السيرفر...")
                 val fileName = "audio_${bookId}_$pageNumber"
-                val result = when (engine) {
-                    "ELEVENLABS" -> ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, fileName)
-                    "GEMINI_TTS" -> GeminiTtsClient(context, httpClient, apiKeyGemini).generateSpeech(page.markdownContent, fileName)
-                    else -> SystemTtsWrapper(context).generateSpeech(page.markdownContent, fileName)
+                val apiKeyGemini = settingsManager.geminiKey.first()
+                val apiKeyEleven = settingsManager.elevenKey.first()
+                
+                val result = if (engine == "ELEVENLABS") {
+                    ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, fileName)
+                } else {
+                    GeminiTtsClient(context, httpClient, apiKeyGemini).generateSpeech(page.markdownContent, fileName)
                 }
 
                 val file = result.getOrNull()
                 if (file != null) {
-                    AppLogger.log(context, isLoggingEnabled, "تم التوليد بنجاح.")
-                    val updatedPage = page.copy(audioUri = file.absolutePath)
-                    repository.insertPages(listOf(updatedPage))
+                    repository.insertPages(listOf(page.copy(audioUri = file.absolutePath)))
                     file
                 } else {
-                    AppLogger.log(context, isLoggingEnabled, "فشل التوليد: ${result.exceptionOrNull()?.message}\n${result.exceptionOrNull()?.stackTraceToString()}")
+                    AppLogger.log(context, isLoggingEnabled, "فشل الصوت: ${result.exceptionOrNull()?.message}")
                     null
                 }
             }
 
             audioFile?.let {
-                AppLogger.log(context, isLoggingEnabled, "تمرير الملف إلى Media3 للبدء...")
-                val mediaItem = MediaItem.fromUri(it.absolutePath)
-                controller?.setMediaItem(mediaItem)
-                controller?.prepare()
-                controller?.play()
+                scope.launch(Dispatchers.Main) {
+                    val mediaItem = MediaItem.fromUri(it.absolutePath)
+                    controller?.setMediaItem(mediaItem)
+                    controller?.prepare()
+                    controller?.play()
+                }
             }
         }
     }
 
     fun togglePlay() {
-        if (controller?.isPlaying == true) {
-            controller?.pause()
-        } else {
-            // إذا انتهى المقطع، نعيده من البداية
-            if (controller?.playbackState == Player.STATE_ENDED) {
-                controller?.seekTo(0)
+        if (currentEngine == "SYSTEM") {
+            if (_isPlaying.value) systemTts.stop()
+            else {
+                generationScope.launch {
+                    val page = repository.getPageByNumber(loadedBookId ?: "", loadedPageNum)
+                    page?.let { systemTts.speak(it.markdownContent) }
+                }
             }
-            controller?.play()
+        } else {
+            scope.launch(Dispatchers.Main) {
+                if (controller?.isPlaying == true) {
+                    controller?.pause()
+                } else {
+                    if (controller?.playbackState == Player.STATE_ENDED) controller?.seekTo(0)
+                    controller?.play()
+                }
+            }
         }
     }
 
-    fun seekForward() = controller?.seekTo((controller?.currentPosition ?: 0L) + 10000)
-    fun seekBackward() = controller?.seekTo((controller?.currentPosition ?: 0L) - 10000)
+    fun seekForward() = if (currentEngine != "SYSTEM") controller?.seekTo((controller?.currentPosition ?: 0L) + 10000) else Unit
+    fun seekBackward() = if (currentEngine != "SYSTEM") controller?.seekTo((controller?.currentPosition ?: 0L) - 10000) else Unit
 
     private fun startProgressUpdate() {
         progressJob?.cancel()
@@ -170,6 +196,7 @@ class AudioPlayerController(
 
     fun release() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
-        stopProgressUpdate()
+        systemTts.release()
+         stopProgressUpdate()
      }
 }
