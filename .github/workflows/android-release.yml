@@ -12,17 +12,16 @@ jobs:
       - name: 🛰️ Checkout Code (v6)
         uses: actions/checkout@v6
 
-      - name: ☕ Setup Java 21 (LTS - Stability First)
+      - name: ☕ Setup Java 25
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
-          java-version: '21' # عدنا للأمان يا صديقي
+          java-version: '25'
           cache: 'gradle'
 
       - name: 🔨 Execute Build (Clean Logs)
         run: |
           chmod +x ./gradlew
-          # تنظيف الكاش القديم لضمان عدم تداخل مخلفات جافا 25
           ./gradlew clean 
           ./gradlew assembleRelease --no-daemon --console=plain -w
 
