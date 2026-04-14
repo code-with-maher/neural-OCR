@@ -9,6 +9,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 @Serializable
 data class FileUploadResponse(
@@ -19,7 +22,8 @@ data class FileUploadResponse(
 data class UploadedFile(
     val name: String? = null,
     val uri: String? = null,
-    val mimeType: String? = null
+    val mimeType: String? = null,
+    val expirationTime: String? = null
 )
 
 class GeminiFilesClient(
@@ -30,7 +34,7 @@ class GeminiFilesClient(
         ignoreUnknownKeys = true
     }
 
-    suspend fun uploadPdfChunk(pdfFile: File): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun uploadPdfChunk(pdfFile: File): Result<Pair<String, Long>> = withContext(Dispatchers.IO) {
         try {
             val url = "https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key=$apiKey"
             val mediaType = "application/pdf".toMediaType()
@@ -47,9 +51,11 @@ class GeminiFilesClient(
             if (response.isSuccessful) {
                 val uploadResponse = jsonConfig.decodeFromString<FileUploadResponse>(responseString)
                 val fileUri = uploadResponse.file?.uri
+                val expirationTimeStr = uploadResponse.file?.expirationTime
 
                 if (fileUri != null) {
-                    Result.success(fileUri)
+                    val expirationMillis = parseExpirationTime(expirationTimeStr)
+                    Result.success(Pair(fileUri, expirationMillis))
                 } else {
                     Result.failure(Exception("Upload succeeded but URI is null"))
                 }
@@ -58,6 +64,25 @@ class GeminiFilesClient(
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun parseExpirationTime(expirationTimeStr: String?): Long {
+        if (expirationTimeStr == null) return 0L
+        return try {
+            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'", Locale.US)
+            format.timeZone = TimeZone.getTimeZone("UTC")
+            val date = format.parse(expirationTimeStr)
+            date?.time ?: 0L
+        } catch (e: Exception) {
+            try {
+                val fallbackFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                fallbackFormat.timeZone = TimeZone.getTimeZone("UTC")
+                val date = fallbackFormat.parse(expirationTimeStr)
+                date?.time ?: 0L
+            } catch (ex: Exception) {
+                0L
+            }
         }
     }
 }
