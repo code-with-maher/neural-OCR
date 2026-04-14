@@ -19,11 +19,19 @@ jobs:
           java-version: '25'
           cache: 'gradle'
 
+      - name: 🔑 Decode Keystore
+        run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
+
       - name: 🔨 Execute Build (Clean Logs)
         run: |
           chmod +x ./gradlew
           ./gradlew clean 
           ./gradlew assembleRelease --no-daemon --console=plain -w
+        env:
+          KEYSTORE_PATH: release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: ✈️ Notify Telegram
         if: success()
