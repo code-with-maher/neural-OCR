@@ -1,32 +1,60 @@
-name: "🔍 Pull Request Quality Guard"
+name: "🛡️ Enterprise Quality & Security Guard"
 
 on:
   pull_request:
     branches: [ "main", "master" ]
 
 jobs:
-  check-quality:
-    name: "Validate Changes"
+  security-scan:
+    name: "🔐 Security"
     runs-on: ubuntu-latest
-
     steps:
-      - name: 🛰️ Checkout Code
-        uses: actions/checkout@v6
-
-      - name: ☕ Setup Java 25
-        uses: actions/setup-java@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '25'
           cache: 'gradle'
+      - uses: actions/dependency-review-action@v4
 
-      - name: 🔨 Validate Build & Tests
-        run: |
+  static-analysis:
+    name: "🔍 Lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+          cache: 'gradle'
+      - run: |
           chmod +x ./gradlew
-          ./gradlew check --no-daemon --console=plain
+          ./gradlew lintRelease --no-daemon
 
-      - name: 📊 Check APK Size Impact
-        run: |
-          ./gradlew assembleRelease --no-daemon --console=plain
-          APK_SIZE=$(du -sh app/build/outputs/apk/release/*.apk | cut -f1)
-          echo "::notice title=APK Size Check::حجم الـ APK المتوقع بعد هذا التحديث هو: $APK_SIZE"
+  unit-tests:
+    name: "🧪 Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+          cache: 'gradle'
+      - run: |
+          chmod +x ./gradlew
+          ./gradlew testReleaseUnitTest --no-daemon
+
+  build-verification:
+    name: "🏗️ Build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+          cache: 'gradle'
+      - run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon -w
