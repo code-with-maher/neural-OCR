@@ -40,8 +40,8 @@ class BookRepository(private val bookDao: BookDao) {
         return bookDao.getChunksByStatus(status)
     }
 
-    suspend fun updateChunkStatus(chunkId: String, status: String, uri: String?) {
-        bookDao.updateChunkStatus(chunkId, status, uri)
+    suspend fun updateChunkStatus(chunkId: String, status: String, uri: String?, expiration: Long?) {
+        bookDao.updateChunkStatus(chunkId, status, uri, expiration)
     }
 
     suspend fun insertPages(pages: List<PageEntity>) {
