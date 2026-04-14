@@ -53,7 +53,6 @@ class PdfExtractionWorker(
             val repository = BookRepository(db.bookDao())
             val chunkSizeValue = settings.chunkSize.first()
 
-            // 1. إنشاء الدفعات فوراً لتفعيل شاشة المراقبة وزر إعادة المحاولة في حال فشل المفتاح
             var chunks = repository.getChunksForBook(bookId)
             if (chunks.isEmpty()) {
                 var currentStart = targetStartPage - 1 
@@ -74,10 +73,9 @@ class PdfExtractionWorker(
                 chunks = repository.getChunksForBook(bookId)
             }
 
-            // 2. التحقق من مفتاح الـ API بعد إنشاء الدفعات
             val apiKey = settings.geminiKey.first()
             if (apiKey.isBlank()) {
-                chunks.forEach { repository.updateChunkStatus(it.id, "FAILED", it.filesApiUri) }
+                chunks.forEach { repository.updateChunkStatus(it.id, "FAILED", it.filesApiUri, it.filesApiUriExpiration) }
                 return failWithMessage("مفتاح Gemini مفقود، يرجى إضافته من الإعدادات.")
             }
 
@@ -85,7 +83,6 @@ class PdfExtractionWorker(
             val book = repository.getBookById(bookId) ?: return failWithMessage("الكتاب غير موجود.")
             val sourceUri = Uri.parse(book.sourcePdfUri)
 
-            // رفع المهلة لـ 15 دقيقة لاستيعاب الدفعات الكبيرة والردود البطيئة
             val httpClient = OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.MINUTES)
                 .readTimeout(15, TimeUnit.MINUTES)
@@ -97,39 +94,46 @@ class PdfExtractionWorker(
             val ocrClient = GeminiOcrClient(httpClient, apiKey, modelName)
 
             val systemPrompt = context.getString(R.string.system_prompt)
-            val userPrompt = context.getString(R.string.user_prompt)
+            val  userPrompt = context.getString(R.string.user_prompt)
 
             for ((index, chunk) in chunks.withIndex()) {
                 if (chunk.status == "COMPLETED") continue
 
                 try {
                     updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
-                    repository.updateChunkStatus(chunk.id, "PROCESSING", chunk.filesApiUri)
+                    
+                    val currentTime = System.currentTimeMillis()
                     var fileUri = chunk.filesApiUri
+                    var expirationTime = chunk.filesApiUriExpiration
 
-                    if (fileUri == null) {
+                    val isExpired = expirationTime != null && currentTime >= expirationTime
+                    val needsUpload = fileUri == null || isExpired
+
+                    if (needsUpload) {
                         val fileName = "chunk_${bookId}_${chunk.startPage}.pdf"
                         val chunkResult = chunker.extractPdfChunk(sourceUri, chunk.startPage, chunk.endPage - chunk.startPage, fileName)
                         val chunkFile = chunkResult.getOrNull() ?: throw Exception("فشل في تقسيم PDF محلياً.")
 
                         val uploadResult = filesClient.uploadPdfChunk(chunkFile)
-                        fileUri = uploadResult.getOrNull()
-
-                        if (fileUri == null) {
+                        val (newUri, newExpiration) = uploadResult.getOrNull() ?: run {
                             chunkFile.delete()
                             throw Exception("فشل الرفع. تأكد من الإنترنت.")
                         }
-
-                        repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri)
+                        
+                        fileUri = newUri
+                        expirationTime = newExpiration
+                        repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri, expirationTime)
                         chunkFile.delete()
+                    } else {
+                        repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri, expirationTime)
                     }
 
-                    val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
-                    
+                    val ocrResult = ocrClient.extractTextFromPdfUri(fileUri!!, systemPrompt, userPrompt)
+
                     if (ocrResult.isFailure) {
                         throw ocrResult.exceptionOrNull() ?: Exception("خطأ غير معروف من جيميناي")
                     }
-                    
+
                     val extractedData = ocrResult.getOrNull() ?: throw Exception("استجابة جيميناي فارغة.")
 
                     val sortedExtractedPages = extractedData.pages.sortedBy { it.pageNumber }
@@ -144,7 +148,7 @@ class PdfExtractionWorker(
                     }
 
                     repository.insertPages(pageEntities)
-                    repository.updateChunkStatus(chunk.id, "COMPLETED", fileUri)
+                    repository.updateChunkStatus(chunk.id, "COMPLETED", fileUri, expirationTime)
 
                 } catch (e: Exception) {
                     val errorString = e.message ?: ""
@@ -156,7 +160,7 @@ class PdfExtractionWorker(
                     }
 
                     AppLogger.log(context, isLoggingEnabled, "خطأ بالدفعة ${index + 1}:\n$friendlyError\n${e.stackTraceToString()}")
-                    repository.updateChunkStatus(chunk.id, "FAILED", chunk.filesApiUri)
+                    repository.updateChunkStatus(chunk.id, "FAILED", chunk.filesApiUri, chunk.filesApiUriExpiration)
                     return failWithMessage(friendlyError)
                 }
             }
@@ -164,7 +168,7 @@ class PdfExtractionWorker(
             notificationManager.cancel(notificationId)
             return Result.success()
 
-        } catch (e: Exception) {
+         } catch (e: Exception) {
             val fatalMsg = e.message ?: "خطأ فادح"
             return failWithMessage(fatalMsg)
         }
@@ -188,8 +192,9 @@ class PdfExtractionWorker(
     }
 
     private fun createForegroundInfo(progressText: String): ForegroundInfo {
+        val appName = context.getString(R.string.app_name)
         val notification = NotificationCompat.Builder(context, channelId)
-            .setContentTitle("ALabs AI")
+            .setContentTitle(appName)
             .setContentText(progressText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
@@ -204,13 +209,14 @@ class PdfExtractionWorker(
     }
 
     private fun updateNotification(progressText: String) {
+        val appName = context.getString(R.string.app_name)
         val notification = NotificationCompat.Builder(context, channelId)
-            .setContentTitle("ALabs AI")
+            .setContentTitle(appName)
             .setContentText(progressText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setProgress(0, 0, true)
             .build()
         notificationManager.notify(notificationId, notification)
-     }
+      }
 }
