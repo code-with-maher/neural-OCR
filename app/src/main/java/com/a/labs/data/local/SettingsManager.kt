@@ -17,6 +17,7 @@ class SettingsManager(private val context: Context) {
     companion object {
         val GEMINI_KEY = stringPreferencesKey("gemini_api_key")
         val ELEVEN_KEY = stringPreferencesKey("eleven_api_key")
+        val ELEVEN_VOICE_ID = stringPreferencesKey("eleven_voice_id")
         val TTS_ENGINE = stringPreferencesKey("tts_engine")
         val GEMINI_MODEL_KEY = stringPreferencesKey("gemini_model")
         val CHUNK_SIZE_KEY = intPreferencesKey("chunk_size")
@@ -26,6 +27,7 @@ class SettingsManager(private val context: Context) {
 
     val geminiKey: Flow<String> = context.dataStore.data.map { it[GEMINI_KEY] ?: "" }
     val elevenKey: Flow<String> = context.dataStore.data.map { it[ELEVEN_KEY] ?: "" }
+    val elevenVoiceId: Flow<String> = context.dataStore.data.map { it[ELEVEN_VOICE_ID] ?: "GHszn56Ads7pHU1bODA2" }
     val ttsEngine: Flow<String> = context.dataStore.data.map { it[TTS_ENGINE] ?: "SYSTEM" }
     val geminiModel: Flow<String> = context.dataStore.data.map { it[GEMINI_MODEL_KEY] ?: GeminiModels.FLASH_3_1_LITE }
     val chunkSize: Flow<Int> = context.dataStore.data.map { it[CHUNK_SIZE_KEY] ?: 15 }
