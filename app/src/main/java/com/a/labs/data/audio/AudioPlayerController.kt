@@ -1,12 +1,17 @@
 package com.a.labs.data.audio
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.a.labs.R
 import com.a.labs.core.AppLogger
 import com.a.labs.data.local.SettingsManager
 import com.a.labs.data.remote.api.ElevenLabsClient
@@ -29,6 +34,8 @@ import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+enum class AudioState { IDLE, PROCESSING, PLAYING, PAUSED, ERROR }
+
 class AudioPlayerController(
     private val context: Context,
     private val repository: BookRepository,
@@ -37,31 +44,47 @@ class AudioPlayerController(
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val controller: MediaController? get() = if (controllerFuture?.isDone == true) controllerFuture?.get() else null
 
-    private val _isPlaying = MutableStateFlow(false)
-    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+    private val _audioState = MutableStateFlow(AudioState.IDLE)
+    val audioState: StateFlow<AudioState> = _audioState.asStateFlow()
 
-    private val _currentProgress = MutableStateFlow(0L)
-    val currentProgress: StateFlow<Long> = _currentProgress.asStateFlow()
+    private val _highlightedParagraphIndex = MutableStateFlow(-1)
+    val highlightedParagraphIndex: StateFlow<Int> = _highlightedParagraphIndex.asStateFlow()
 
-    private val _duration = MutableStateFlow(0L)
-    val duration: StateFlow<Long> = _duration.asStateFlow()
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
-    // نطاق منفصل يضمن عدم موت طلب التوليد إذا خرج المستخدم من الشاشة
     private val generationScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var progressJob: Job? = null
-    
+
     private var loadedBookId: String? = null
     private var loadedPageNum: Int = -1
     private var currentEngine: String = "SYSTEM"
+    private var currentParagraphsCount: Int = 1
+
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val notifyId = 2002
 
     private val systemTts = SystemTtsWrapper(context).apply {
         onPlaybackStateChanged = { playing ->
-            _isPlaying.value = playing
+            _audioState.value = if (playing) AudioState.PLAYING else AudioState.PAUSED
+        }
+        onHighlightProgress = { charIndex ->
+            if (charIndex == -1) {
+                _highlightedParagraphIndex.value = -1
+            } else {
+                scope.launch {
+                    val page = repository.getPageByNumber(loadedBookId ?: "", loadedPageNum)
+                    page?.let { p ->
+                        val textUpToChar = p.markdownContent.substring(0, charIndex.coerceAtMost(p.markdownContent.length))
+                        val paragraphsBefore = textUpToChar.split("\n\n").size - 1
+                        _highlightedParagraphIndex.value = paragraphsBefore.coerceAtLeast(0)
+                    }
+                }
+            }
         }
     }
 
-    // رفع المهلة لـ 15 دقيقة
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.MINUTES)
         .readTimeout(15, TimeUnit.MINUTES)
@@ -69,55 +92,59 @@ class AudioPlayerController(
         .build()
 
     init {
+        createNotificationChannel()
         initializeController()
     }
 
     private fun initializeController() {
-        val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        val sessionToken = SessionToken(context,  ComponentName(context, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture?.addListener({
             controller?.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     if (currentEngine != "SYSTEM") {
-                        _isPlaying.value = isPlaying
-                        if (isPlaying) startProgressUpdate() else stopProgressUpdate()
+                        _audioState.value = if (isPlaying) AudioState.PLAYING else AudioState.PAUSED
+                        if (isPlaying) startHighlightUpdate() else stopHighlightUpdate()
                     }
                 }
                 override fun onPlaybackStateChanged(state: Int) {
                     if (currentEngine != "SYSTEM") {
-                        if (state == Player.STATE_READY) _duration.value = controller?.duration ?: 0L
-                        else if (state == Player.STATE_ENDED) _isPlaying.value = false
+                        if (state == Player.STATE_ENDED) {
+                            _audioState.value = AudioState.PAUSED
+                            _highlightedParagraphIndex.value = -1
+                        }
                     }
                 }
                 override fun onPlayerError(error: PlaybackException) {
-                    scope.launch {
-                        val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
-                        AppLogger.log(context, isLoggingEnabled, "Media3 Error:  ${error.message}")
-                    }
+                    _audioState.value = AudioState.ERROR
+                    _errorMessage.value = "حدث خطأ في المشغل الصوتي: ${error.message}"
                 }
             })
         }, MoreExecutors.directExecutor())
     }
+
+    fun clearError() { _errorMessage.value = null }
 
     fun playPage(bookId: String, pageNumber: Int) {
         generationScope.launch {
             val engine = settingsManager.ttsEngine.first()
             currentEngine = engine
 
-            if (loadedBookId == bookId && loadedPageNum == pageNumber) {
+            if (loadedBookId == bookId && loadedPageNum == pageNumber && _audioState.value != AudioState.ERROR) {
                 togglePlay()
                 return@launch
             }
 
             loadedBookId = bookId
             loadedPageNum = pageNumber
-            val isLoggingEnabled = settingsManager.isLoggingEnabled.first()
             val page = repository.getPageByNumber(bookId, pageNumber) ?: return@launch
+            
+            val paragraphs = page.markdownContent.split("\n\n").filter { it.isNotBlank() }
+            currentParagraphsCount = paragraphs.size.coerceAtLeast(1)
 
             if (engine == "SYSTEM") {
                 scope.launch(Dispatchers.Main) { controller?.pause() }
                 systemTts.speak(page.markdownContent)
-                AppLogger.log(context, isLoggingEnabled, "بدء القراءة الفورية عبر System TTS")
                 return@launch
             }
 
@@ -126,26 +153,39 @@ class AudioPlayerController(
             val audioFile = if (page.audioUri != null && File(page.audioUri).exists()) {
                 File(page.audioUri)
             } else {
-                AppLogger.log(context, isLoggingEnabled, "جاري طلب الصوت من السيرفر...")
+                _audioState.value = AudioState.PROCESSING
+                showGenerationNotification()
+                
                 val fileName = "audio_${bookId}_$pageNumber"
                 val apiKeyGemini = settingsManager.geminiKey.first()
                 val apiKeyEleven = settingsManager.elevenKey.first()
-                
+                val elevenVoiceId = settingsManager.elevenVoiceId.first()
+
                 val result = if (engine == "ELEVENLABS") {
-                    ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, fileName)
+                    if (apiKeyEleven.isBlank()) {
+                        reportError("مفتاح ElevenLabs غير موجود، يرجى إضافته من الإعدادات.")
+                        return@launch
+                    }
+                    ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, fileName, elevenVoiceId)
                 } else {
+                    if (apiKeyGemini.isBlank()) {
+                        reportError("مفتاح Gemini غير موجود، يرجى إضافته من الإعدادات.")
+                        return@launch
+                    }
                     GeminiTtsClient(context, httpClient, apiKeyGemini).generateSpeech(page.markdownContent, fileName)
                 }
 
                 val file = result.getOrNull()
+                notificationManager.cancel(notifyId)
+                
                 if (file != null) {
                     repository.insertPages(listOf(page.copy(audioUri = file.absolutePath)))
                     file
                 } else {
-                    AppLogger.log(context, isLoggingEnabled, "فشل الصوت: ${result.exceptionOrNull()?.message}")
+                    reportError("فشل توليد الصوت: ${result.exceptionOrNull()?.message}")
                     null
                 }
-            }
+             }
 
             audioFile?.let {
                 scope.launch(Dispatchers.Main) {
@@ -158,9 +198,9 @@ class AudioPlayerController(
         }
     }
 
-    fun togglePlay() {
+    private fun togglePlay() {
         if (currentEngine == "SYSTEM") {
-            if (_isPlaying.value) systemTts.stop()
+            if (_audioState.value == AudioState.PLAYING) systemTts.stop()
             else {
                 generationScope.launch {
                     val page = repository.getPageByNumber(loadedBookId ?: "", loadedPageNum)
@@ -179,24 +219,55 @@ class AudioPlayerController(
         }
     }
 
-    fun seekForward() = if (currentEngine != "SYSTEM") controller?.seekTo((controller?.currentPosition ?: 0L) + 10000) else Unit
-    fun seekBackward() = if (currentEngine != "SYSTEM") controller?.seekTo((controller?.currentPosition ?: 0L) - 10000) else Unit
+    private fun reportError(msg: String) {
+        notificationManager.cancel(notifyId)
+        _audioState.value = AudioState.ERROR
+        _errorMessage.value = msg
+    }
 
-    private fun startProgressUpdate() {
+    private fun startHighlightUpdate() {
         progressJob?.cancel()
         progressJob = scope.launch {
             while (true) {
-                _currentProgress.value = controller?.currentPosition ?: 0L
-                delay(500)
+                val duration = controller?.duration ?: 1L
+                val currentPos = controller?.currentPosition ?: 0L
+                if (duration > 0 && currentParagraphsCount > 0) {
+                    val progressRatio = currentPos.toFloat() / duration.toFloat()
+                    val index = (progressRatio * currentParagraphsCount).toInt().coerceIn(0, currentParagraphsCount - 1)
+                    _highlightedParagraphIndex.value = index
+                }
+                delay(200)
             }
         }
     }
 
-    private fun stopProgressUpdate() { progressJob?.cancel() }
+    private fun stopHighlightUpdate() { progressJob?.cancel() }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("audio_gen_channel", "توليد الصوت", NotificationManager.IMPORTANCE_LOW)
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showGenerationNotification() {
+        val appName = context.getString(R.string.app_name)
+        val notification = NotificationCompat.Builder(context, "audio_gen_channel")
+            .setContentTitle(appName)
+            .setContentText("جاري معالجة وتوليد الصوت بذكاء...")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setOngoing(true)
+            .setProgress(0, 0, true)
+            .build()
+        notificationManager.notify(notifyId, notification)
+    }
+
+    fun seekForward() = if (currentEngine != "SYSTEM") controller?.seekTo((controller?.currentPosition ?: 0L) + 10000) else Unit
+    fun seekBackward() = if (currentEngine != "SYSTEM") controller?.seekTo((controller?.currentPosition ?: 0L) - 10000) else Unit
 
     fun release() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
         systemTts.release()
-         stopProgressUpdate()
+        stopHighlightUpdate()
      }
 }
