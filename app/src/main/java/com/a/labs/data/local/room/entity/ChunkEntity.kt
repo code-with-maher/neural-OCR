@@ -24,5 +24,6 @@ data class ChunkEntity(
     val startPage: Int,
     val endPage: Int,
     val filesApiUri: String? = null,
+    val filesApiUriExpiration: Long? = null,
     val status: String 
 )
