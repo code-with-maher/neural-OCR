@@ -12,7 +12,6 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -33,76 +32,87 @@ fun SettingsScreen(navController: NavHostController) {
 
     val geminiKey by settingsManager.geminiKey.collectAsState("")
     val elevenKey by settingsManager.elevenKey.collectAsState("")
+    val elevenVoiceId by settingsManager.elevenVoiceId.collectAsState("GHszn56Ads7pHU1bODA2")
     val selectedEngine by settingsManager.ttsEngine.collectAsState("SYSTEM")
     val selectedModel by settingsManager.geminiModel.collectAsState(GeminiModels.FLASH_3_1_LITE)
     val chunkSize by settingsManager.chunkSize.collectAsState(15)
     val devModeUnlocked by settingsManager.isDevModeUnlocked.collectAsState(false)
     val loggingEnabled by settingsManager.isLoggingEnabled.collectAsState(false)
 
-    var showGeminiDialog by remember { mutableStateOf(false) }
-    var showElevenDialog by remember { mutableStateOf(false) }
-    var tempGeminiKey by remember { mutableStateOf("") }
-    var tempElevenKey by remember { mutableStateOf("") }
+    var activeBottomSheet by remember { mutableStateOf<String?>(null) }
+    var tempInput by remember { mutableStateOf("") }
+    
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var engineExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
-    
+
     var versionTaps by remember { mutableIntStateOf(0) }
     val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
     val versionName = packageInfo.versionName ?: "1.0"
 
     val engines = listOf("SYSTEM", "ELEVENLABS", "GEMINI_TTS")
 
-    if (showGeminiDialog) {
-        AlertDialog(
-            onDismissRequest = { showGeminiDialog = false },
-            title = { Text("Gemini API Key") },
-            text = {
+    if (activeBottomSheet != null) {
+        ModalBottomSheet(
+            onDismissRequest = { activeBottomSheet = null },
+            sheetState = sheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = when (activeBottomSheet) {
+                        "GEMINI" -> "Gemini API Key"
+                        "ELEVEN_KEY" -> "ElevenLabs API Key"
+                        "ELEVEN_VOICE" -> "ElevenLabs Voice ID"
+                        else -> ""
+                    },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                
                 OutlinedTextField(
-                    value = tempGeminiKey,
-                    onValueChange = { tempGeminiKey = it },
-                    label = { Text("المفتاح الخاص بك") },
+                    value = tempInput,
+                    onValueChange = { tempInput = it },
+                    label = { Text("أدخل القيمة هنا") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    scope.launch { settingsManager.saveSetting(SettingsManager.GEMINI_KEY, tempGeminiKey) }
-                    showGeminiDialog = false
-                    Toast.makeText(context, "تم حفظ المفتاح بنجاح", Toast.LENGTH_SHORT).show()
-                }) { Text("حفظ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGeminiDialog = false }) { Text("إلغاء") }
-            }
-        )
-    }
 
-    if (showElevenDialog) {
-        AlertDialog(
-            onDismissRequest = { showElevenDialog = false },
-            title = { Text("ElevenLabs API Key") },
-            text = {
-                OutlinedTextField(
-                    value = tempElevenKey,
-                    onValueChange = { tempElevenKey = it },
-                    label = { Text("المفتاح الخاص بك") },
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                     scope.launch { settingsManager.saveSetting(SettingsManager.ELEVEN_KEY, tempElevenKey) }
-                    showElevenDialog = false
-                    Toast.makeText(context, "تم حفظ المفتاح بنجاح", Toast.LENGTH_SHORT).show()
-                }) { Text("حفظ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showElevenDialog = false }) { Text("إلغاء") }
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { 
+                        scope.launch { sheetState.hide() }.invokeOnCompletion { activeBottomSheet = null }
+                    }) {
+                         Text("إلغاء")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = {
+                        scope.launch {
+                            when (activeBottomSheet) {
+                                "GEMINI" -> settingsManager.saveSetting(SettingsManager.GEMINI_KEY, tempInput)
+                                "ELEVEN_KEY" -> settingsManager.saveSetting(SettingsManager.ELEVEN_KEY, tempInput)
+                                "ELEVEN_VOICE" -> settingsManager.saveSetting(SettingsManager.ELEVEN_VOICE_ID, tempInput)
+                            }
+                            sheetState.hide()
+                        }.invokeOnCompletion {
+                            activeBottomSheet = null
+                            Toast.makeText(context, "تم الحفظ بنجاح", Toast.LENGTH_SHORT).show()
+                        }
+                    }) {
+                        Text("حفظ")
+                    }
+                }
             }
-        )
+        }
     }
 
     Scaffold(
@@ -118,7 +128,9 @@ fun SettingsScreen(navController: NavHostController) {
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -131,8 +143,8 @@ fun SettingsScreen(navController: NavHostController) {
                             supportingContent = { Text(if (geminiKey.isNotBlank()) "تمت الإضافة" else "لم يتم التكوين") },
                             leadingContent = { Icon(Icons.Default.Key, null) },
                             modifier = Modifier.clickable {
-                                tempGeminiKey = geminiKey
-                                showGeminiDialog = true
+                                tempInput = geminiKey
+                                activeBottomSheet = "GEMINI"
                             }
                         )
                         HorizontalDivider()
@@ -141,8 +153,8 @@ fun SettingsScreen(navController: NavHostController) {
                             supportingContent = { Text(if (elevenKey.isNotBlank()) "تمت الإضافة" else "لم يتم التكوين") },
                             leadingContent = { Icon(Icons.Default.VpnKey, null) },
                             modifier = Modifier.clickable {
-                                tempElevenKey = elevenKey
-                                showElevenDialog = true
+                                tempInput = elevenKey
+                                activeBottomSheet = "ELEVEN_KEY"
                             }
                         )
                     }
@@ -160,7 +172,9 @@ fun SettingsScreen(navController: NavHostController) {
                                 readOnly = true,
                                 label = { Text("نموذج الرؤية (OCR)") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modelExpanded) },
-                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                                 modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth()
                             )
                             ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
                                 GeminiModels.availableModels.forEach { model ->
@@ -179,7 +193,9 @@ fun SettingsScreen(navController: NavHostController) {
                                 readOnly = true,
                                 label = { Text("محرك النطق (TTS)") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(engineExpanded) },
-                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth()
                             )
                             ExposedDropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
                                 engines.forEach { engine ->
@@ -189,6 +205,27 @@ fun SettingsScreen(navController: NavHostController) {
                                     })
                                 }
                             }
+                        }
+
+                        if (selectedEngine == "ELEVENLABS") {
+                            OutlinedTextField(
+                                value = elevenVoiceId,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("معرف الصوت (Voice ID)") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        tempInput = elevenVoiceId
+                                        activeBottomSheet = "ELEVEN_VOICE"
+                                    },
+                                enabled = false, 
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                    disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            )
                         }
                     }
                 }
@@ -203,7 +240,7 @@ fun SettingsScreen(navController: NavHostController) {
                         Slider(
                             value = chunkSize.toFloat(),
                             onValueChange = { scope.launch { settingsManager.saveSetting(SettingsManager.CHUNK_SIZE_KEY, it.toInt()) } },
-                            valueRange = 5f..40f,
+                             valueRange = 5f..40f,
                             steps = 6
                         )
                     }
@@ -271,5 +308,5 @@ fun SettingsScreen(navController: NavHostController) {
                 }
             }
         }
-     }
+      }
 }
