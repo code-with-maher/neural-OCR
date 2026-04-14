@@ -15,14 +15,16 @@ android {
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0-beta-15-04-2026"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            // استخدام توقيع الديباج مؤقتاً لنسخة الريليس لتسهيل البناء السريع
             signingConfig = signingConfigs.getByName("debug")
+            
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
