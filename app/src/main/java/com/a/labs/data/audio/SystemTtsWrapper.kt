@@ -10,14 +10,16 @@ class SystemTtsWrapper(private val context: Context) {
 
     private var tts: TextToSpeech? = null
     private var isReady = false
+    
     var onPlaybackStateChanged: ((Boolean) -> Unit)? = null
+    var onHighlightProgress: ((Int) -> Unit)? = null
 
     init {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 isReady = true
                 val arabicLocale = Locale.Builder().setLanguage("ar").build()
-                
+
                 if (tts?.isLanguageAvailable(arabicLocale) ?: -1 >= TextToSpeech.LANG_AVAILABLE) {
                     tts?.language = arabicLocale
                 } else {
@@ -31,6 +33,7 @@ class SystemTtsWrapper(private val context: Context) {
 
                     override fun onDone(utteranceId: String?) {
                         onPlaybackStateChanged?.invoke(false)
+                        onHighlightProgress?.invoke(-1)
                     }
 
                     @Deprecated("Deprecated in Java")
@@ -40,6 +43,10 @@ class SystemTtsWrapper(private val context: Context) {
 
                     override fun onError(utteranceId: String?, errorCode: Int) {
                         onPlaybackStateChanged?.invoke(false)
+                    }
+
+                    override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                        onHighlightProgress?.invoke(start)
                     }
                 })
             }
@@ -57,6 +64,7 @@ class SystemTtsWrapper(private val context: Context) {
         if (isReady && tts?.isSpeaking == true) {
             tts?.stop()
             onPlaybackStateChanged?.invoke(false)
+            onHighlightProgress?.invoke(-1)
         }
     }
 
