@@ -32,9 +32,8 @@ class ElevenLabsClient(
     private val apiKey: String
 ) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val voiceId = "GHszn56Ads7pHU1bODA2"
 
-    suspend fun generateSpeech(text: String, fileName: String): Result<File> = withContext(Dispatchers.IO) {
+    suspend fun generateSpeech(text: String, fileName: String, voiceId: String): Result<File> = withContext(Dispatchers.IO) {
         try {
             val url = "https://api.elevenlabs.io/v1/text-to-speech/$voiceId"
             val requestBody = json.encodeToString(ElevenLabsRequest(text))
