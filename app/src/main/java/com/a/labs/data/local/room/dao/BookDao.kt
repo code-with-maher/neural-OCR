@@ -35,8 +35,8 @@ interface BookDao {
     @Query("SELECT * FROM chunks WHERE status = :status")
     suspend fun getChunksByStatus(status: String): List<ChunkEntity>
 
-    @Query("UPDATE chunks SET status = :status, filesApiUri = :uri WHERE id = :chunkId")
-    suspend fun updateChunkStatus(chunkId: String, status: String, uri: String?)
+    @Query("UPDATE chunks SET status = :status, filesApiUri = :uri, filesApiUriExpiration = :expiration WHERE id = :chunkId")
+    suspend fun updateChunkStatus(chunkId: String, status: String, uri: String?, expiration: Long?)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPages(pages: List<PageEntity>)
