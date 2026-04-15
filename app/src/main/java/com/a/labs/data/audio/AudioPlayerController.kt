@@ -111,6 +111,16 @@ class AudioPlayerController(
                         if (isPlaying) startHighlightUpdate() else stopHighlightUpdate()
                     }
                 }
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (currentEngine != "SYSTEM" && state == Player.STATE_ENDED) {
+                        _audioState.value = AudioState.PAUSED
+                        _highlightedParagraphIndex.value = -1
+                    }
+                }
+                override fun onPlayerError(error: PlaybackException) {
+                    _audioState.value = AudioState.ERROR
+                    _errorMessage.value = error.message
+                }
             })
         }, MoreExecutors.directExecutor())
     }
@@ -167,13 +177,16 @@ class AudioPlayerController(
         notificationManager.cancel(2002)
         val file = result.getOrNull()
         if (file != null) repository.insertPages(listOf(page.copy(audioUri = file.absolutePath)))
-        else _audioState.value = AudioState.ERROR
+        else {
+            _audioState.value = AudioState.ERROR
+            _errorMessage.value = result.exceptionOrNull()?.message
+        }
         return file
     }
 
     private fun requestAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val attr = AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_MEDIA).setContentType(AndroidAudioAttributes.CONTENT_TYPE_SPEECH).build()
+            val attr =  AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_MEDIA).setContentType(AndroidAudioAttributes.CONTENT_TYPE_SPEECH).build()
             audioManager.requestAudioFocus(AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attr).setOnAudioFocusChangeListener(focusChangeListener).build())
         } else {
             @Suppress("DEPRECATION")
@@ -182,12 +195,22 @@ class AudioPlayerController(
     }
 
     private fun pauseInternal() {
-        if (currentEngine == "SYSTEM") systemTts.stop(manual = false) else  controller?.pause()
+        if (currentEngine == "SYSTEM") {
+            systemTts.stop(manual = false)
+        } else {
+            // تغليف داخل Dispatchers.Main لمنع الانهيار
+            scope.launch(Dispatchers.Main) { controller?.pause() }
+        }
     }
 
     private fun resumeInternal() {
         requestAudioFocus()
-        if (currentEngine == "SYSTEM") systemTts.resume() else controller?.play()
+        if (currentEngine == "SYSTEM") {
+            systemTts.resume()
+        } else {
+            // تغليف داخل Dispatchers.Main لمنع الانهيار
+            scope.launch(Dispatchers.Main) { controller?.play() }
+        }
     }
 
     private fun startHighlightUpdate() {
@@ -196,7 +219,9 @@ class AudioPlayerController(
             while (true) {
                 val duration = controller?.duration ?: 1L
                 val pos = controller?.currentPosition ?: 0L
-                _highlightedParagraphIndex.value = ((pos.toFloat() / duration.toFloat()) * currentParagraphsCount).toInt().coerceIn(0, currentParagraphsCount - 1)
+                if (duration > 0) {
+                    _highlightedParagraphIndex.value = ((pos.toFloat() / duration.toFloat()) * currentParagraphsCount).toInt().coerceIn(0, currentParagraphsCount - 1)
+                }
                 delay(300)
             }
         }
@@ -216,7 +241,18 @@ class AudioPlayerController(
     }
 
     fun clearError() { _errorMessage.value = null }
-    fun seekForward() = controller?.seekTo((controller?.currentPosition ?: 0L) + 10000)
-    fun seekBackward() = controller?.seekTo((controller?.currentPosition ?: 0L) - 10000)
-    fun release() { controllerFuture?.let { MediaController.releaseFuture(it) }; systemTts.release(); stopHighlightUpdate()  }
+    
+    fun seekForward() {
+        scope.launch(Dispatchers.Main) { controller?.seekTo((controller?.currentPosition ?: 0L) + 10000) }
+    }
+    
+    fun seekBackward() {
+        scope.launch(Dispatchers.Main) { controller?.seekTo((controller?.currentPosition ?: 0L) - 10000) }
+    }
+    
+    fun release() { 
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        systemTts.release()
+        stopHighlightUpdate() 
+     }
 }
