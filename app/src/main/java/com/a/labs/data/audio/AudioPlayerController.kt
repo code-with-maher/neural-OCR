@@ -58,28 +58,28 @@ class AudioPlayerController(
     private var loadedPageNum: Int = -1
     private var currentEngine: String = "SYSTEM"
     private var currentParagraphsCount: Int = 1
-    private var wasPlayingBeforeInterrupt = false
+    private var userIntendedToPlay = false
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                if (_audioState.value == AudioState.PLAYING) {
-                    wasPlayingBeforeInterrupt = true
-                    pauseInternal()
+        if (currentEngine == "SYSTEM") {
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    if (_audioState.value == AudioState.PLAYING) {
+                        systemTts.stop(manual = false)
+                    }
                 }
-            }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                if (wasPlayingBeforeInterrupt) {
-                    wasPlayingBeforeInterrupt = false
-                    resumeInternal()
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    if (userIntendedToPlay) {
+                        systemTts.resume()
+                    }
                 }
-            }
-            AudioManager.AUDIOFOCUS_LOSS -> {
-                wasPlayingBeforeInterrupt = false
-                pauseInternal()
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    userIntendedToPlay = false
+                    systemTts.stop(manual = true)
+                }
             }
         }
     }
@@ -93,11 +93,14 @@ class AudioPlayerController(
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.MINUTES)
+        .readTimeout(15, TimeUnit.MINUTES)
+         .writeTimeout(15, TimeUnit.MINUTES)
+        .callTimeout(15, TimeUnit.MINUTES)
         .build()
 
     init {
         createNotificationChannel()
-         initializeController()
+        initializeController()
     }
 
     private fun initializeController() {
@@ -114,11 +117,13 @@ class AudioPlayerController(
                 override fun onPlaybackStateChanged(state: Int) {
                     if (currentEngine != "SYSTEM" && state == Player.STATE_ENDED) {
                         _audioState.value = AudioState.PAUSED
+                        userIntendedToPlay = false
                         _highlightedParagraphIndex.value = -1
                     }
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     _audioState.value = AudioState.ERROR
+                    userIntendedToPlay = false
                     _errorMessage.value = error.message
                 }
             })
@@ -130,23 +135,31 @@ class AudioPlayerController(
             val engine = settingsManager.ttsEngine.first()
             currentEngine = engine
 
-            if (loadedBookId == bookId && loadedPageNum == pageNumber) {
-                if (_audioState.value == AudioState.PLAYING) pauseInternal() else resumeInternal()
+            if (loadedBookId == bookId && loadedPageNum == pageNumber && _audioState.value != AudioState.ERROR) {
+                if (_audioState.value == AudioState.PLAYING) {
+                    userIntendedToPlay = false
+                    pauseInternal()
+                } else {
+                    userIntendedToPlay = true
+                    resumeInternal()
+                }
                 return@launch
             }
 
             loadedBookId = bookId
             loadedPageNum = pageNumber
+            userIntendedToPlay = true
+            
             val page = repository.getPageByNumber(bookId, pageNumber) ?: return@launch
             currentParagraphsCount = page.markdownContent.split("\n\n").filter { it.isNotBlank() }.size
 
-            requestAudioFocus()
-
             if (engine == "SYSTEM") {
                 scope.launch(Dispatchers.Main) { controller?.pause() }
+                requestSystemAudioFocus()
                 systemTts.speak(page.markdownContent)
             } else {
-                systemTts.stop()
+                systemTts.stop(manual = true)
+                abandonSystemAudioFocus()
                 val audioFile = getAudioFile(page, bookId, pageNumber, engine)
                 audioFile?.let {
                     scope.launch(Dispatchers.Main) {
@@ -171,7 +184,7 @@ class AudioPlayerController(
         val result = if (engine == "ELEVENLABS") {
             ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber", voiceId)
         } else {
-            GeminiTtsClient(context, httpClient, apiKeyGemini).generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber")
+            GeminiTtsClient(context, httpClient,  apiKeyGemini).generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber")
         }
 
         notificationManager.cancel(2002)
@@ -184,31 +197,39 @@ class AudioPlayerController(
         return file
     }
 
-    private fun requestAudioFocus() {
+    private fun requestSystemAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val attr =  AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_MEDIA).setContentType(AndroidAudioAttributes.CONTENT_TYPE_SPEECH).build()
-            audioManager.requestAudioFocus(AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attr).setOnAudioFocusChangeListener(focusChangeListener).build())
+            val attr = AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AndroidAudioAttributes.CONTENT_TYPE_SPEECH).build()
+            audioManager.requestAudioFocus(AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attr).setOnAudioFocusChangeListener(focusChangeListener).build())
         } else {
             @Suppress("DEPRECATION")
-            audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_ACCESSIBILITY, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        }
+    }
+    
+    private fun abandonSystemAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val attr = AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AndroidAudioAttributes.CONTENT_TYPE_SPEECH).build()
+            audioManager.abandonAudioFocusRequest(AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attr).setOnAudioFocusChangeListener(focusChangeListener).build())
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(focusChangeListener)
         }
     }
 
     private fun pauseInternal() {
         if (currentEngine == "SYSTEM") {
-            systemTts.stop(manual = false)
+            systemTts.stop(manual = !userIntendedToPlay)
         } else {
-            // تغليف داخل Dispatchers.Main لمنع الانهيار
             scope.launch(Dispatchers.Main) { controller?.pause() }
         }
     }
 
     private fun resumeInternal() {
-        requestAudioFocus()
         if (currentEngine == "SYSTEM") {
+            requestSystemAudioFocus()
             systemTts.resume()
         } else {
-            // تغليف داخل Dispatchers.Main لمنع الانهيار
             scope.launch(Dispatchers.Main) { controller?.play() }
         }
     }
@@ -251,6 +272,7 @@ class AudioPlayerController(
     }
     
     fun release() { 
+        abandonSystemAudioFocus()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         systemTts.release()
         stopHighlightUpdate() 
