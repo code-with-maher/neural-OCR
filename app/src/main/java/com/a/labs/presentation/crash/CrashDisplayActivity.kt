@@ -1,5 +1,8 @@
 package com.a.labs.presentation.crash
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -14,21 +17,17 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 
 class CrashDisplayActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // جلب تفاصيل الخطأ من الـ Intent
+
         val crashDetails = intent.getStringExtra("ERROR_DETAILS") ?: "خطأ غير معروف، اختفى الكراش بطريقة غامضة!"
 
         setContent {
@@ -42,7 +41,6 @@ class CrashDisplayActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CrashScreen(crashDetails: String) {
-    val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
     Scaffold(
@@ -66,18 +64,19 @@ fun CrashScreen(crashDetails: String) {
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    clipboardManager.setText(AnnotatedString(crashDetails))
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("Crash Report", crashDetails)
+                    clipboard.setPrimaryClip(clip)
                     Toast.makeText(context, "تم نسخ تقرير الخطأ بنجاح", Toast.LENGTH_SHORT).show()
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
-                // دعم إمكانية الوصول: وصف الزر لقارئات الشاشة
                 modifier = Modifier.semantics {
                     contentDescription = "زر نسخ تقرير الخطأ بالكامل إلى الحافظة"
                 }
             ) {
                 Icon(
                     imageVector = Icons.Default.ContentCopy,
-                    contentDescription = null // تم وضع الوصف في الـ Modifier الأب
+                    contentDescription = null
                 )
             }
         }
@@ -95,7 +94,6 @@ fun CrashScreen(crashDetails: String) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            // حاوية تتيح تحديد النص يدوياً (مفيدة جداً للمطورين)
             SelectionContainer(
                 modifier = Modifier
                     .fillMaxSize()
@@ -109,10 +107,9 @@ fun CrashScreen(crashDetails: String) {
                 Text(
                     text = crashDetails,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace // خط المبرمجين الواضح
+                        fontFamily = FontFamily.Monospace 
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    // دعم إمكانية الوصول: قراءة محتوى الخطأ
                     modifier = Modifier.semantics {
                         contentDescription = "تفاصيل الخطأ البرمجي: $crashDetails"
                     }
