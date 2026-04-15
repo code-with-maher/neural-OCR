@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.net.SocketTimeoutException
 
 class PdfExtractionWorker(
     private val context: Context,
@@ -87,21 +88,22 @@ class PdfExtractionWorker(
                 .connectTimeout(15, TimeUnit.MINUTES)
                 .readTimeout(15, TimeUnit.MINUTES)
                 .writeTimeout(15, TimeUnit.MINUTES)
+                .callTimeout(15, TimeUnit.MINUTES)
                 .build()
 
             val chunker = PdfChunkerUseCase(context)
             val filesClient =  GeminiFilesClient(httpClient, apiKey)
             val ocrClient = GeminiOcrClient(httpClient, apiKey, modelName)
 
-            val systemPrompt = context.getString(R.string.system_prompt)
-            val  userPrompt = context.getString(R.string.user_prompt)
+             val systemPrompt = context.getString(R.string.system_prompt)
+            val userPrompt = context.getString(R.string.user_prompt)
 
             for ((index, chunk) in chunks.withIndex()) {
                 if (chunk.status == "COMPLETED") continue
 
                 try {
                     updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
-
+                    
                     val currentTime = System.currentTimeMillis()
                     var fileUri = chunk.filesApiUri
                     var expirationTime = chunk.filesApiUriExpiration
@@ -119,7 +121,7 @@ class PdfExtractionWorker(
                             chunkFile.delete()
                             throw Exception("فشل الرفع. تأكد من الإنترنت.")
                         }
-
+                        
                         fileUri = newUri
                         expirationTime = newExpiration
                         repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri, expirationTime)
@@ -153,14 +155,15 @@ class PdfExtractionWorker(
                 } catch (e: Exception) {
                     val errorString = e.message ?: ""
                     val friendlyError = when {
-                        errorString.contains("503") -> "خوادم الذكاء الاصطناعي عليها ضغط هائل حالياً. يرجى تغيير النموذج من الإعدادات أو إعادة المحاولة."
+                        e is SocketTimeoutException -> "انتهى وقت الاتصال (Timeout). الخادم استغرق أكثر من 15 دقيقة للرد. يرجى التأكد من استقرار الإنترنت."
+                        errorString.contains("timeout", ignoreCase = true) -> "انتهى وقت الاتصال. يرجى التأكد من استقرار الإنترنت."
+                        errorString.contains("503") -> "خوادم الذكاء الاصطناعي عليها ضغط هائل حالياً. يرجى تغيير النموذج أو إعادة المحاولة لاحقاً."
                         errorString.contains("404") -> "النموذج المختار غير مدعوم، يرجى تغييره من الإعدادات."
-                        errorString.contains("timeout", ignoreCase = true) -> "انتهى وقت الاتصال (Timeout). يرجى التأكد من سرعة الإنترنت."
                         else -> "حدث خطأ غير متوقع: $errorString"
                     }
 
                     AppLogger.log(context, isLoggingEnabled, "خطأ بالدفعة ${index + 1}:\n$friendlyError\n${e.stackTraceToString()}")
-                    repository.updateChunkStatus(chunk.id, "FAILED", chunk.filesApiUri, chunk.filesApiUriExpiration)
+                    repository.updateChunkStatus(chunk.id, "FAILED",  chunk.filesApiUri, chunk.filesApiUriExpiration)
                     return failWithMessage(friendlyError)
                 }
             }
@@ -168,7 +171,7 @@ class PdfExtractionWorker(
             notificationManager.cancel(notificationId)
             return Result.success()
 
-         } catch (e: Exception) {
+        } catch (e: Exception) {
             val fatalMsg = e.message ?: "خطأ فادح"
             return failWithMessage(fatalMsg)
         }
