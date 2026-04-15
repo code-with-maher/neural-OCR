@@ -1,6 +1,7 @@
 package com.a.labs.data.remote.api
 
 import android.content.Context
+import android.util.Log
 import com.a.labs.core.GeminiModels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,7 +71,9 @@ class GeminiTtsClient(
 
     suspend fun generateSpeech(text: String, fileName: String, voiceName: String = "Aoede"): Result<File> = withContext(Dispatchers.IO) {
         try {
-            // استخدام النموذج الصحيح من ملف الكتالوج
+            // تنظيف اسم الملف لتجنب الكراش بسبب الرموز الغريبة
+            val safeFileName = fileName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            
             val url = "https://generativelanguage.googleapis.com/v1beta/models/${GeminiModels.TTS_MODEL}:generateContent?key=$apiKey"
             val requestBodyDto = TtsRequest(
                 contents = listOf(TtsContent(listOf(TtsPart(text)))),
@@ -83,21 +86,41 @@ class GeminiTtsClient(
                 .url(url)
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
-            val response = client.newCall(request).execute()
-            val responseString = response.body.string()
-            
-            if (response.isSuccessful) {
+
+            // استخدام 'use' لإغلاق الاتصال وتحرير الذاكرة تلقائياً
+            client.newCall(request).execute().use { response -> 
+                
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string() ?: "No Error Body"
+                    Log.e("GeminiTtsClient", "API Error: Code ${response.code} | Body: $errorBody")
+                    return@withContext Result.failure(Exception("API Error: ${response.code}"))
+                }
+
+                val responseString = response.body?.string() 
+                if (responseString.isNullOrEmpty()) {
+                    Log.e("GeminiTtsClient", "Empty response from server")
+                    return@withContext Result.failure(Exception("Empty response body"))
+                }
+
                 val ttsResponse = jsonConfig.decodeFromString<TtsResponse>(responseString)
                 val base64Audio = ttsResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.inlineData?.data
-                if (base64Audio != null) {
+                
+                if (!base64Audio.isNullOrEmpty()) {
                     val audioBytes = android.util.Base64.decode(base64Audio, android.util.Base64.DEFAULT)
-                    val outputFile = File(context.cacheDir, "$fileName.wav")
+                    val outputFile = File(context.cacheDir, "$safeFileName.wav")
                     saveAsWav(audioBytes, outputFile, 24000, 1)
-                    Result.success(outputFile)
-                } else Result.failure(Exception("No audio data"))
-            } else Result.failure(Exception("API Error: ${response.code}"))
-        } catch (e: Exception) {
-            Result.failure(e)
+                    
+                    Log.i("GeminiTtsClient", "Audio generated successfully: ${outputFile.absolutePath}")
+                    return@withContext Result.success(outputFile)
+                } else {
+                    Log.e("GeminiTtsClient", "No audio data found in the valid JSON response")
+                    return@withContext Result.failure(Exception("No audio data"))
+                }
+            }
+        } catch (t: Throwable) { 
+            // السر هنا: التقاط Throwable لاصطياد الـ OutOfMemoryError
+            Log.e("GeminiTtsClient", "🔥🔥 CRITICAL CRASH PREVENTED: ${t.javaClass.simpleName} - ${t.message}", t)
+            Result.failure(Exception("Fatal error: ${t.message}", t))
         }
     }
 
@@ -106,7 +129,7 @@ class GeminiTtsClient(
         val byteRate = sampleRate * channels * 2
         val header =  ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
             put("RIFF".toByteArray())
-             putInt(totalDataLen)
+            putInt(totalDataLen)
             put("WAVE".toByteArray())
             put("fmt ".toByteArray())
             putInt(16)
@@ -123,5 +146,5 @@ class GeminiTtsClient(
             output.write(header)
             output.write(pcmData)
         }
-      }
+    }
 }
