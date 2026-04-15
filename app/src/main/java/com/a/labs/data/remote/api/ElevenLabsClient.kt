@@ -42,16 +42,26 @@ class ElevenLabsClient(
                 .header("xi-api-key", apiKey)
                 .post(requestBody.toRequestBody("application/json".toMediaType()))
                 .build()
+                
             val response = client.newCall(request).execute()
+            
             if (response.isSuccessful) {
-                val outputFile = File(context.cacheDir, "$fileName.mp3")
-                response.body.byteStream().use { input ->
-                    FileOutputStream(outputFile).use { output ->
-                        input.copyTo(output)
+                val responseBody = response.body
+                if (responseBody != null) {
+                    val outputFile = File(context.cacheDir, "$fileName.mp3")
+                    responseBody.byteStream().use { input ->
+                        FileOutputStream(outputFile).use { output ->
+                            input.copyTo(output)
+                        }
                     }
+                    Result.success(outputFile)
+                } else {
+                    Result.failure(Exception("ElevenLabs Error: Empty audio stream"))
                 }
-                Result.success(outputFile)
-            } else Result.failure(Exception("ElevenLabs Error: ${response.code}"))
+            } else {
+                val errorBody = response.body?.string() ?: "Unknown error"
+                Result.failure(Exception("ElevenLabs Error: ${response.code} - $errorBody"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
