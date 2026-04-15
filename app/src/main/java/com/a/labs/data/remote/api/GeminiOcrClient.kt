@@ -85,15 +85,15 @@ class GeminiOcrClient(
 
             val request = Request.Builder().url(url).post(requestBody).build()
             val response = client.newCall(request).execute()
-            val responseString = response.body.string()
+            val responseString = response.body?.string() ?: ""
 
-            if (response.isSuccessful) {
+            if (response.isSuccessful && responseString.isNotEmpty()) {
                 val geminiResponse = jsonConfig.decodeFromString<GeminiResponse>(responseString)
                 val rawJsonText = geminiResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                
+
                 if (rawJsonText != null) {
                     val cleanJson = rawJsonText.replace(Regex("```json\n?|```"), "").trim()
-                    val ocrResult =  jsonConfig.decodeFromString<OcrResultDto>(cleanJson)
+                    val ocrResult =   jsonConfig.decodeFromString<OcrResultDto>(cleanJson)
                     Result.success(ocrResult)
                 } else {
                     Result.failure(Exception("استجابة Gemini فارغة أو لا تحتوي على نص."))
@@ -104,5 +104,5 @@ class GeminiOcrClient(
         } catch (e: Exception) {
             Result.failure(e)
         }
-     }
+      }
 }
