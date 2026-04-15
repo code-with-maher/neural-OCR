@@ -1,0 +1,49 @@
+name: "🛠️ Debug Crash-Hunter Build & Telegram Dispatch"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "Build & Upload Debug APK"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛰️ Checkout Code (v6)
+        uses: actions/checkout@v6
+
+      - name: ☕ Setup Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+          cache: 'gradle'
+
+      - name: 🔑 Decode Keystore
+        # نستخدم نفس المفتاح لضمان توافق التثبيت على هاتفك
+        run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
+
+      - name: 🔨 Execute Debug Build
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean 
+          # نستخدم assembleDebug هنا بدلاً من assembleRelease
+          ./gradlew assembleDebug --no-daemon --console=plain -w
+        env:
+          # المسار يجب أن يكون متوافقاً مع ما يتوقعه ملف gradle.kts
+          KEYSTORE_PATH: ../release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: ✈️ Notify Telegram (Debug Version)
+        if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # تأكد من أن ملف notify_telegram.py مبرمج ليرسل ملف الـ APK من مسار الـ debug
+          # المسار الافتراضي للـ APK الناتج سيكون:
+          # app/build/outputs/apk/debug/app-debug.apk
+          pip install requests
+          python3 notify_telegram.py
