@@ -17,12 +17,12 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         
         val audioAttributes = AudioAttributes.Builder()
-            .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC) 
             .setUsage(C.USAGE_MEDIA)
             .build()
 
         player = ExoPlayer.Builder(this)
-            .setAudioAttributes(audioAttributes, true) 
+            .setAudioAttributes(audioAttributes, false) 
             .build()
             
         mediaSession = MediaSession.Builder(this, player).build()
