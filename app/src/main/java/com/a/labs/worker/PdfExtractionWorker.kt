@@ -101,7 +101,7 @@ class PdfExtractionWorker(
 
                 try {
                     updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
-                    
+
                     val currentTime = System.currentTimeMillis()
                     var fileUri = chunk.filesApiUri
                     var expirationTime = chunk.filesApiUriExpiration
@@ -119,7 +119,7 @@ class PdfExtractionWorker(
                             chunkFile.delete()
                             throw Exception("فشل الرفع. تأكد من الإنترنت.")
                         }
-                        
+
                         fileUri = newUri
                         expirationTime = newExpiration
                         repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri, expirationTime)
