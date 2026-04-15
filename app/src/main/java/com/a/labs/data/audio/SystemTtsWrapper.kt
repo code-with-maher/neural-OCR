@@ -40,12 +40,7 @@ class SystemTtsWrapper(private val context: Context) {
                         }
                     }
 
-                    @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
-                        onPlaybackStateChanged?.invoke(false)
-                    }
-
-                    override fun onError(utteranceId: String?, errorCode: Int) {
                         onPlaybackStateChanged?.invoke(false)
                     }
                 })
