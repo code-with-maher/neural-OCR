@@ -71,9 +71,8 @@ class GeminiTtsClient(
 
     suspend fun generateSpeech(text: String, fileName: String, voiceName: String = "Aoede"): Result<File> = withContext(Dispatchers.IO) {
         try {
-            // تنظيف اسم الملف لتجنب الكراش بسبب الرموز الغريبة
             val safeFileName = fileName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
-            
+
             val url = "https://generativelanguage.googleapis.com/v1beta/models/${GeminiModels.TTS_MODEL}:generateContent?key=$apiKey"
             val requestBodyDto = TtsRequest(
                 contents = listOf(TtsContent(listOf(TtsPart(text)))),
@@ -87,9 +86,8 @@ class GeminiTtsClient(
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            // استخدام 'use' لإغلاق الاتصال وتحرير الذاكرة تلقائياً
             client.newCall(request).execute().use { response -> 
-                
+
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string() ?: "No Error Body"
                     Log.e("GeminiTtsClient", "API Error: Code ${response.code} | Body: $errorBody")
@@ -104,12 +102,12 @@ class GeminiTtsClient(
 
                 val ttsResponse = jsonConfig.decodeFromString<TtsResponse>(responseString)
                 val base64Audio = ttsResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.inlineData?.data
-                
+
                 if (!base64Audio.isNullOrEmpty()) {
                     val audioBytes = android.util.Base64.decode(base64Audio, android.util.Base64.DEFAULT)
                     val outputFile = File(context.cacheDir, "$safeFileName.wav")
                     saveAsWav(audioBytes, outputFile, 24000, 1)
-                    
+
                     Log.i("GeminiTtsClient", "Audio generated successfully: ${outputFile.absolutePath}")
                     return@withContext Result.success(outputFile)
                 } else {
@@ -118,7 +116,6 @@ class GeminiTtsClient(
                 }
             }
         } catch (t: Throwable) { 
-            // السر هنا: التقاط Throwable لاصطياد الـ OutOfMemoryError
             Log.e("GeminiTtsClient", "🔥🔥 CRITICAL CRASH PREVENTED: ${t.javaClass.simpleName} - ${t.message}", t)
             Result.failure(Exception("Fatal error: ${t.message}", t))
         }
