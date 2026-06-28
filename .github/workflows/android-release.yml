@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🛰️ Checkout Code (v6)
+      - name: 🛰️ Checkout Code (v7)
         uses: actions/checkout@v7
 
       - name: ☕ Setup Java 25
@@ -17,27 +17,42 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '25'
-          cache: 'gradle'
+          cache: 'gradle' # يتكفل بكاش الـ Dependencies والـ Wrapper عالمياً
 
+      # ⚡ ترقية حصرية: كاش محلي داخل المشروع لكوتلن والـ Configuration 
+      - name: ⚡ Cache Project-Level Build Metadata
+        uses: actions/cache@v4
+        with:
+          path: |
+            .gradle/configuration-cache
+            .kotlin/compileKotlin
+          key: ${{ runs-on }}-kotlin-config-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', 'gradle.properties') }}
+          restore-keys: |
+            ${{ runs-on }}-kotlin-config-
+
+      # ملحوظة: تم الاحتفاظ بمسار فك التشفير في الجذر ليتوافق مع متغير البيئة الممرر لجريدل
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
 
-      - name: 🔨 Execute Build (Clean Logs)
+      - name: 🔨 Execute Build (Turbo Mode)
         run: |
           chmod +x ./gradlew
-          ./gradlew clean 
-          ./gradlew assembleRelease --no-daemon --console=plain -w
+          # تم تفعيل الكاش المتطور، المعالجة المتوازية، وكاش التهيئة، مع إزالة clean و no-daemon
+          ./gradlew assembleRelease --build-cache --configuration-cache --parallel --console=plain -w
         env:
-          KEYSTORE_PATH: ../release.jks
+          KEYSTORE_PATH: ../release.jks # تأكد أن ملف build.gradle يقرأه نسبة لمجلد app
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: ✈️ Notify Telegram
+      - name: ✈️ Notify Telegram (Native Fast)
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # استبدال البايثون بـ curl أصيل؛ أسرع، أخف، وبدون تحميل حزم إضافية
         run: |
-          pip install requests
-          python3 notify_telegram.py
+          APK_PATH=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+          curl -F document=@"$APK_PATH" \
+          -F caption="🚀 تم بناء نسخة الـ Production بنجاح باستخدام Java 25 وكاش متطور!" \
+          "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
