@@ -6,12 +6,10 @@ import re
 from pathlib import Path
 
 def get_version_name():
-    """استخراج رقم الإصدار من ملف الجريدل"""
     try:
         path = "app/build.gradle.kts"
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            # البحث عن الـ versionName باستخدام Regex
             match = re.search(r'versionName\s*=\s*"([^"]+)"', content)
             if match:
                 return match.group(1)
@@ -20,7 +18,6 @@ def get_version_name():
     return "Unknown"
 
 def send_apks_to_telegram():
-    # سحب المتغيرات من البيئة
     bot_token = os.getenv('BOT_TOKEN', '').strip()
     chat_id = os.getenv('CHAT_ID', '').strip()
 
@@ -28,10 +25,7 @@ def send_apks_to_telegram():
         print("❌ Error: BOT_TOKEN or CHAT_ID is missing!")
         sys.exit(1)
 
-    # البحث عن جميع ملفات APK في مسار الـ release
     apk_files = glob.glob("app/build/outputs/apk/release/*.apk", recursive=True)
-    
-    # فلترة الملفات للتأكد من أنها من نوع Release
     release_apks = [f for f in apk_files if "release" in f.lower() and "unaligned" not in f.lower()]
 
     if not release_apks:
@@ -41,26 +35,14 @@ def send_apks_to_telegram():
 
     version_name = get_version_name()
     print(f"📦 Found {len(release_apks)} Release APK files")
-    
-    # إرسال كل ملف على حدة
+
     success_count = 0
     for apk_path in release_apks:
-        # استخراج المعمارية من اسم الملف
-        abi = "universal"
-        if "arm64-v8a" in apk_path:
-            abi = "ARM64-v8a"
-        elif "armeabi-v7a" in apk_path:
-            abi = "ARMv7a"
-        elif "x86_64" in apk_path:
-            abi = "x86_64"
-        elif "x86" in apk_path:
-            abi = "x86"
-        
-        file_size = os.path.getsize(apk_path) / (1024 * 1024)  # حجم الملف بالميجابايت
-        
+        abi = "ARM64-v8a" if "arm64-v8a" in apk_path else "universal"
+        file_size = os.path.getsize(apk_path) / (1024 * 1024)
+
         print(f"📤 Sending: {os.path.basename(apk_path)} ({abi}, {file_size:.1f} MB)")
-        
-        # تجهيز النص الاحترافي لكل ملف
+
         caption = (
             f"🚀 **New Build Dispatch**\n\n"
             f"🔹 **Type:** RELEASE\n"
@@ -94,14 +76,13 @@ def send_apks_to_telegram():
         except Exception as e:
             print(f"💥 Exception while sending {os.path.basename(apk_path)}: {str(e)}")
 
-    # تقرير نهائي
     print(f"\n📊 Summary: {success_count}/{len(release_apks)} APK files sent successfully")
-    
+
     if success_count == 0:
         sys.exit(1)
     elif success_count < len(release_apks):
         print("⚠️ Some files failed to send, but continuing...")
-        sys.exit(0)  # نجاح جزئي
+        sys.exit(0)
 
 if __name__ == "__main__":
     send_apks_to_telegram()
