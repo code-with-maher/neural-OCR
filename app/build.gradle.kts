@@ -18,6 +18,10 @@ android {
         versionName = "1.0.0-beta-15-04-2026"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -55,15 +59,6 @@ android {
         }
     }
 
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = false
-        }
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_25
         targetCompatibility = JavaVersion.VERSION_25
@@ -83,10 +78,7 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
-            val abi = output.filters.find { it.filterType.name == "ABI" }?.identifier
-            if (abi != null) {
-                output.outputFileName.set("Labs-${variant.name}-$abi-${android.defaultConfig.versionName}.apk")
-            }
+            output.outputFileName.set("Labs-${variant.name}-arm64-v8a-${android.defaultConfig.versionName}.apk")
         }
     }
 }
