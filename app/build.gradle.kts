@@ -41,19 +41,19 @@ android {
         debug {
             // نستخدم نفس التوقيع لكي يقبل الهاتف التحديث/التثبيت
             signingConfig = signingConfigs.getByName("mainConfig")
-            
+
             // ميزات التصحيح
             isMinifyEnabled = false
             isShrinkResources = false
             isDebuggable = true
-            
+
             // لاحقة لتمييز نسخة المطورين (اختياري، يمكنك حذفها إذا أردت تطابقاً تاماً)
             applicationIdSuffix = ".debug"
         }
 
         release {
             signingConfig = signingConfigs.getByName("mainConfig")
-            
+
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -62,6 +62,29 @@ android {
             )
         }
     }
+
+    // ====== التعديل المطلوب: تقسيم APK حسب المعمارية ======
+    splits {
+        abi {
+            enable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
+    // تخصيص أسماء الملفات الناتجة (اختياري للتوضيح)
+    applicationVariants.all {
+        variant ->
+        variant.outputs.forEach {
+            output ->
+            val abi = output.getFilter(com.android.build.OutputFile.ABI)
+            if (abi != null) {
+                output.outputFileName = "Labs-${variant.name}-$abi-${defaultConfig.versionName}.apk"
+            }
+        }
+    }
+    // ====== نهاية التعديل ======
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_25
@@ -88,7 +111,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.core.splashscreen)
-    
+
     // UI & Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -97,23 +120,23 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
-    
+
     // Navigation & Data
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
-    
+
     // Database (Room)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
-    
+
     // Networking & Media
     implementation(libs.okhttp)
     implementation(libs.pdfbox.android)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
-    
+
     // Background Tasks
     implementation(libs.androidx.work.runtime.ktx)
 }
