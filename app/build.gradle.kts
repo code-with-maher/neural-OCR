@@ -63,28 +63,15 @@ android {
         }
     }
 
-    // ====== التعديل المطلوب: تقسيم APK حسب المعمارية ======
+    // ====== تم الإصلاح: استخدام isEnable المتوافقة مع Kotlin DSL ======
     splits {
         abi {
-            enable = true
+            isEnable = true
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86_64")
             isUniversalApk = false
         }
     }
-
-    // تخصيص أسماء الملفات الناتجة (اختياري للتوضيح)
-    applicationVariants.all {
-        variant ->
-        variant.outputs.forEach {
-            output ->
-            val abi = output.getFilter(com.android.build.OutputFile.ABI)
-            if (abi != null) {
-                output.outputFileName = "Labs-${variant.name}-$abi-${defaultConfig.versionName}.apk"
-            }
-        }
-    }
-    // ====== نهاية التعديل ======
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_25
@@ -99,6 +86,18 @@ android {
 
     buildFeatures {
         compose = true
+    }
+}
+
+// ====== تم الإصلاح: تخصيص أسماء الملفات باستخدام واجهة AndroidComponents الحديثة ======
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters.find { it.filterType == com.android.build.api.variant.FilterType.ABI }?.identifier
+            if (abi != null) {
+                output.outputFileName.set("Labs-${variant.name}-$abi-${android.defaultConfig.versionName}.apk")
+            }
+        }
     }
 }
 
