@@ -58,7 +58,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             _currentPageNumber.value = pageNumber
             repository.updateLastReadPage(bookId, pageNumber)
-            
+
             repository.getPagesForBook(bookId).collect { pages ->
                 val page = pages.find { it.pageNumber == pageNumber }
                 _currentPageData.value = page
@@ -155,5 +155,5 @@ class ReaderViewModel(
     override fun onCleared() {
         super.onCleared()
         audioController.release()
-     }
+    }
 }
