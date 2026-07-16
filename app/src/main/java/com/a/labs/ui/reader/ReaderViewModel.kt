@@ -35,6 +35,12 @@ class ReaderViewModel(
     private val _currentPageData = MutableStateFlow<PageEntity?>(null)
     val currentPageData: StateFlow<PageEntity?> = _currentPageData.asStateFlow()
 
+    private val _isProcessing = MutableStateFlow(false)
+    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+
+    private val _isFailed = MutableStateFlow(false)
+    val isFailed: StateFlow<Boolean> = _isFailed.asStateFlow()
+
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
 
@@ -66,14 +72,20 @@ class ReaderViewModel(
             repository.getPagesForBook(bookId).collect { pages ->
                 val page = pages.find { it.pageNumber == pageNumber }
                 _currentPageData.value = page
+
+                val chunks = repository.getChunksForBook(bookId)
+                _isFailed.value = chunks.any { it.status == "FAILED" }
+                _isProcessing.value = chunks.any { it.status == "PENDING" || it.status == "PROCESSING" }
             }
         }
     }
 
-    fun nextPage() {
+    fun nextPage(onBookEnded: () -> Unit) {
         val book = _currentBook.value ?: return
         if (_currentPageNumber.value < book.totalPages) {
             loadPage(book.id, _currentPageNumber.value + 1)
+        } else {
+            onBookEnded()
         }
     }
 
