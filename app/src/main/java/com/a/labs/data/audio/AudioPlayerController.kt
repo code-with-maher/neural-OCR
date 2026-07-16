@@ -213,7 +213,7 @@ class AudioPlayerController(
             currentParagraphsCount = page.markdownContent.split("\n\n").filter { it.isNotBlank() }.size
 
             if (engine == "SYSTEM") {
-                scope.launch(Dispatchers.Main) { controller?.pause() }
+                scope.launch { awaitController()?.pause() }
                 requestSystemAudioFocus()
                 systemTts.speak(page.markdownContent)
             } else {
@@ -221,17 +221,15 @@ class AudioPlayerController(
                 abandonSystemAudioFocus()
                 val audioFile = getAudioFile(page, bookId, pageNumber, engine)
                 audioFile?.let {
-                    scope.launch(Dispatchers.Main) {
-                        val activeController = controller
-                        if (activeController != null) {
-                            val mediaItem = MediaItem.Builder()
-                                .setMediaId("$bookId::$pageNumber")
-                                .setUri(it.absolutePath)
-                                .build()
-                            activeController.setMediaItem(mediaItem)
-                            activeController.prepare()
-                            activeController.play()
-                        }
+                    scope.launch {
+                        val activeController = awaitController() ?: return@launch
+                        val mediaItem = MediaItem.Builder()
+                            .setMediaId("$bookId::$pageNumber")
+                            .setUri(it.absolutePath)
+                            .build()
+                        activeController.setMediaItem(mediaItem)
+                        activeController.prepare()
+                        activeController.play()
                     }
                 }
             }
@@ -283,20 +281,20 @@ class AudioPlayerController(
         }
     }
 
-    private fun pauseInternal() {
+    private suspend fun pauseInternal() {
         if (currentEngine == "SYSTEM") {
             systemTts.stop(manual = !userIntendedToPlay)
         } else {
-            scope.launch(Dispatchers.Main) { controller?.pause() }
+            withContext(Dispatchers.Main) { awaitController()?.pause() }
         }
     }
 
-    private fun resumeInternal() {
+    private suspend fun resumeInternal() {
         if (currentEngine == "SYSTEM") {
             requestSystemAudioFocus()
             systemTts.resume()
         } else {
-            scope.launch(Dispatchers.Main) { controller?.play() }
+            withContext(Dispatchers.Main) { awaitController()?.play() }
         }
     }
 
@@ -319,6 +317,24 @@ class AudioPlayerController(
 
     private fun stopHighlightUpdate() = progressJob?.cancel()
 
+    // البوابة الموحّدة الوحيدة للوصول إلى MediaController في هذا الملف.
+    // تنتظر اكتمال الاتصال بدل الاعتماد على isDone فقط، وتضمن أن نتيجة الانتظار
+    // والوصول للكونترولر يتمّان دائمًا على الـ Main thread (المطلوب من Media3).
+    private suspend fun awaitController(): MediaController? = withContext(Dispatchers.Main) {
+        initializeController()
+        val future = controllerFuture ?: return@withContext null
+        if (future.isDone) {
+            try { future.get() } catch (e: Exception) { null }
+        } else {
+            suspendCancellableCoroutine { cont ->
+                future.addListener({
+                    val result = try { future.get() } catch (e: Exception) { null }
+                    if (cont.isActive) cont.resume(result)
+                }, MoreExecutors.directExecutor())
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notificationManager.createNotificationChannel(NotificationChannel("audio_gen_channel", "توليد الصوت", NotificationManager.IMPORTANCE_LOW))
@@ -333,22 +349,16 @@ class AudioPlayerController(
     fun clearError() { _errorMessage.value = null }
 
     fun seekForward() {
-        initializeController()
-        scope.launch(Dispatchers.Main) { 
-            val activeController = controller
-            if (activeController != null) {
-                activeController.seekTo(activeController.currentPosition + 10000)
-            }
+        scope.launch {
+            val activeController = awaitController() ?: return@launch
+            activeController.seekTo(activeController.currentPosition + 10000)
         }
     }
 
     fun seekBackward() {
-        initializeController()
-        scope.launch(Dispatchers.Main) {
-            val activeController = controller
-            if (activeController != null) {
-                activeController.seekTo(activeController.currentPosition - 10000)
-            }
+        scope.launch {
+            val activeController = awaitController() ?: return@launch
+            activeController.seekTo(activeController.currentPosition - 10000)
         }
     }
 
