@@ -95,7 +95,7 @@ class PdfExtractionWorker(
             val filesClient =  GeminiFilesClient(httpClient, apiKey)
             val ocrClient = GeminiOcrClient(httpClient, apiKey, modelName)
 
-             val systemPrompt = context.getString(R.string.system_prompt)
+            val systemPrompt = context.getString(R.string.system_prompt)
             val userPrompt = context.getString(R.string.user_prompt)
 
             for ((index, chunk) in chunks.withIndex()) {
@@ -103,7 +103,7 @@ class PdfExtractionWorker(
 
                 try {
                     updateNotification("جاري معالجة الدفعة ${index + 1} من ${chunks.size}...")
-                    
+
                     val currentTime = System.currentTimeMillis()
                     var fileUri = chunk.filesApiUri
                     var expirationTime = chunk.filesApiUriExpiration
@@ -121,7 +121,7 @@ class PdfExtractionWorker(
                             chunkFile.delete()
                             throw Exception("فشل الرفع. تأكد من الإنترنت.")
                         }
-                        
+
                         fileUri = newUri
                         expirationTime = newExpiration
                         repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri, expirationTime)
@@ -140,7 +140,8 @@ class PdfExtractionWorker(
 
                     val sortedExtractedPages = extractedData.pages.sortedBy { it.pageNumber }
                     val pageEntities = sortedExtractedPages.mapIndexed { i, dto ->
-                        val strictPageNumber = chunk.startPage + 1 + i 
+                        val originalPageNumber = chunk.startPage + 1 + i
+                        val strictPageNumber = originalPageNumber - targetStartPage + 1
                         PageEntity(
                             id = UUID.randomUUID().toString(),
                             bookId = bookId,
@@ -179,7 +180,7 @@ class PdfExtractionWorker(
 
     private suspend fun failWithMessage(msg: String): Result {
         notificationManager.cancel(notificationId)
-         AppLogger.log(context, isLoggingEnabled, "توقف Worker بسبب: $msg")
+        AppLogger.log(context, isLoggingEnabled, "توقف Worker بسبب: $msg")
         return Result.failure(workDataOf("error" to msg))
     }
 
@@ -221,5 +222,5 @@ class PdfExtractionWorker(
             .setProgress(0, 0, true)
             .build()
         notificationManager.notify(notificationId, notification)
-      }
+    }
 }
