@@ -37,6 +37,8 @@ fun ReaderScreen(
     val book by viewModel.currentBook.collectAsState()
     val pageData by viewModel.currentPageData.collectAsState()
     val currentPageNumber by viewModel.currentPageNumber.collectAsState()
+    val isProcessing by viewModel.isProcessing.collectAsState()
+    val isFailed by viewModel.isFailed.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
 
     val audioState by viewModel.audioController.audioState.collectAsState()
@@ -98,6 +100,28 @@ fun ReaderScreen(
                             viewModel.audioController.clearError()
                             activeBottomSheet = null
                         }) { Text("حسناً") }
+                    }
+                    "BOOK_ENDED" -> {
+                        Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("لقد انتهى الكتاب!", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("تهانينا! لقد أتممت قراءة واستماع هذا الكتاب بنجاح.", textAlign = TextAlign.Center)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { activeBottomSheet = null }) { Text("إغلاق") }
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    activeBottomSheet = null
+                                    viewModel.loadPage(book!!.id, 1)
+                                }
+                            ) { Text("إعادة القراءة") }
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    activeBottomSheet = null
+                                    navController.popBackStack()
+                                }
+                            ) { Text("المكتبة") }
+                        }
                     }
                 }
             }
@@ -161,7 +185,7 @@ fun ReaderScreen(
                             else -> "تشغيل"
                         }
 
-                         ExtendedFloatingActionButton(
+                        ExtendedFloatingActionButton(
                             onClick = { viewModel.playAudio() },
                             modifier = Modifier.clearAndSetSemantics {
                                 role = Role.Button
@@ -182,7 +206,7 @@ fun ReaderScreen(
                         IconButton(onClick = { viewModel.audioController.seekForward() }) {
                             Icon(Icons.Default.Forward10, contentDescription = "تقديم 10 ثواني")
                         }
-                        IconButton(onClick = { viewModel.nextPage() }) {
+                        IconButton(onClick = { viewModel.nextPage { activeBottomSheet = "BOOK_ENDED" } }) {
                             Icon(Icons.Default.SkipNext, contentDescription = "الصفحة التالية")
                         }
                     }
@@ -194,7 +218,24 @@ fun ReaderScreen(
     ) { padding ->
         if (pageData == null) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    if (isFailed) {
+                        Icon(Icons.Default.ErrorOutline, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
+                        Text("توقفت المعالجة", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text("واجه التطبيق مشكلة أثناء استخراج نصوص هذا الكتاب.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.outline)
+                        Button(onClick = { navController.popBackStack() }) {
+                            Text("العودة للمكتبة")
+                        }
+                    } else {
+                        CircularProgressIndicator(modifier = Modifier.size(48.dp))
+                        Text("جاري معالجة الصفحة...", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text("يتم استخراج نصوص هذه الصفحة عبر الذكاء الاصطناعي بالخلفية.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
             }
         } else {
             val content = pageData!!.markdownContent
@@ -231,5 +272,5 @@ fun ReaderScreen(
                 }
             }
         }
-     }
+    }
 }
