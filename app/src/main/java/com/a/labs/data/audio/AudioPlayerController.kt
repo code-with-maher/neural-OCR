@@ -94,7 +94,7 @@ class AudioPlayerController(
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.MINUTES)
         .readTimeout(15, TimeUnit.MINUTES)
-         .writeTimeout(15, TimeUnit.MINUTES)
+        .writeTimeout(15, TimeUnit.MINUTES)
         .callTimeout(15, TimeUnit.MINUTES)
         .build()
 
@@ -104,33 +104,63 @@ class AudioPlayerController(
     }
 
     private fun initializeController() {
+        if (controllerFuture != null && !controllerFuture!!.isCancelled) {
+            return
+        }
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture?.addListener({
-            controller?.addListener(object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (currentEngine != "SYSTEM") {
-                        _audioState.value = if (isPlaying) AudioState.PLAYING else AudioState.PAUSED
-                        if (isPlaying) startHighlightUpdate() else stopHighlightUpdate()
+            try {
+                val currentController = controller
+                currentController?.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (currentEngine != "SYSTEM") {
+                            _audioState.value = if (isPlaying) AudioState.PLAYING else AudioState.PAUSED
+                            if (isPlaying) startHighlightUpdate() else stopHighlightUpdate()
+                        }
                     }
-                }
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (currentEngine != "SYSTEM" && state == Player.STATE_ENDED) {
-                        _audioState.value = AudioState.PAUSED
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (currentEngine != "SYSTEM") {
+                            when (state) {
+                                Player.STATE_ENDED -> {
+                                    _audioState.value = AudioState.PAUSED
+                                    userIntendedToPlay = false
+                                    _highlightedParagraphIndex.value = -1
+                                }
+                                Player.STATE_READY -> {
+                                    _audioState.value = if (currentController.isPlaying) AudioState.PLAYING else AudioState.PAUSED
+                                }
+                                Player.STATE_BUFFERING -> {
+                                    _audioState.value = AudioState.PROCESSING
+                                }
+                                Player.STATE_IDLE -> {
+                                    _audioState.value = AudioState.IDLE
+                                }
+                            }
+                        }
+                    }
+                    override fun onPlayerError(error: PlaybackException) {
+                        _audioState.value = AudioState.ERROR
                         userIntendedToPlay = false
-                        _highlightedParagraphIndex.value = -1
+                        _errorMessage.value = error.message
+                    }
+                })
+                
+                currentController?.let {
+                    if (currentEngine != "SYSTEM") {
+                        _audioState.value = if (it.isPlaying) AudioState.PLAYING else AudioState.PAUSED
+                        if (it.isPlaying) startHighlightUpdate()
                     }
                 }
-                override fun onPlayerError(error: PlaybackException) {
-                    _audioState.value = AudioState.ERROR
-                    userIntendedToPlay = false
-                    _errorMessage.value = error.message
-                }
-            })
+            } catch (e: Exception) {
+                _audioState.value = AudioState.ERROR
+                _errorMessage.value = e.message
+            }
         }, MoreExecutors.directExecutor())
     }
 
     fun playPage(bookId: String, pageNumber: Int) {
+        initializeController()
         generationScope.launch {
             val engine = settingsManager.ttsEngine.first()
             currentEngine = engine
@@ -149,7 +179,7 @@ class AudioPlayerController(
             loadedBookId = bookId
             loadedPageNum = pageNumber
             userIntendedToPlay = true
-            
+
             val page = repository.getPageByNumber(bookId, pageNumber) ?: return@launch
             currentParagraphsCount = page.markdownContent.split("\n\n").filter { it.isNotBlank() }.size
 
@@ -163,9 +193,12 @@ class AudioPlayerController(
                 val audioFile = getAudioFile(page, bookId, pageNumber, engine)
                 audioFile?.let {
                     scope.launch(Dispatchers.Main) {
-                        controller?.setMediaItem(MediaItem.fromUri(it.absolutePath))
-                        controller?.prepare()
-                        controller?.play()
+                        val activeController = controller
+                        if (activeController != null) {
+                            activeController.setMediaItem(MediaItem.fromUri(it.absolutePath))
+                            activeController.prepare()
+                            activeController.play()
+                        }
                     }
                 }
             }
@@ -174,7 +207,7 @@ class AudioPlayerController(
 
     private suspend fun getAudioFile(page: com.a.labs.data.local.room.entity.PageEntity, bookId: String, pageNumber: Int, engine: String): File? {
         if (page.audioUri != null && File(page.audioUri).exists()) return File(page.audioUri)
-        
+
         _audioState.value = AudioState.PROCESSING
         showGenerationNotification()
         val apiKeyGemini = settingsManager.geminiKey.first()
@@ -184,7 +217,7 @@ class AudioPlayerController(
         val result = if (engine == "ELEVENLABS") {
             ElevenLabsClient(context, httpClient, apiKeyEleven).generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber", voiceId)
         } else {
-            GeminiTtsClient(context, httpClient,  apiKeyGemini).generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber")
+            GeminiTtsClient(context, httpClient, apiKeyGemini).generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber")
         }
 
         notificationManager.cancel(2002)
@@ -206,7 +239,7 @@ class AudioPlayerController(
             audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_ACCESSIBILITY, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
         }
     }
-    
+
     private fun abandonSystemAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val attr = AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AndroidAudioAttributes.CONTENT_TYPE_SPEECH).build()
@@ -238,10 +271,13 @@ class AudioPlayerController(
         progressJob?.cancel()
         progressJob = scope.launch {
             while (true) {
-                val duration = controller?.duration ?: 1L
-                val pos = controller?.currentPosition ?: 0L
-                if (duration > 0) {
-                    _highlightedParagraphIndex.value = ((pos.toFloat() / duration.toFloat()) * currentParagraphsCount).toInt().coerceIn(0, currentParagraphsCount - 1)
+                val activeController = controller
+                if (activeController != null) {
+                    val duration = activeController.duration
+                    val pos = activeController.currentPosition
+                    if (duration > 0) {
+                        _highlightedParagraphIndex.value = ((pos.toFloat() / duration.toFloat()) * currentParagraphsCount).toInt().coerceIn(0, currentParagraphsCount - 1)
+                    }
                 }
                 delay(300)
             }
@@ -262,19 +298,34 @@ class AudioPlayerController(
     }
 
     fun clearError() { _errorMessage.value = null }
-    
+
     fun seekForward() {
-        scope.launch(Dispatchers.Main) { controller?.seekTo((controller?.currentPosition ?: 0L) + 10000) }
+        initializeController()
+        scope.launch(Dispatchers.Main) { 
+            val activeController = controller
+            if (activeController != null) {
+                activeController.seekTo(activeController.currentPosition + 10000)
+            }
+        }
     }
-    
+
     fun seekBackward() {
-        scope.launch(Dispatchers.Main) { controller?.seekTo((controller?.currentPosition ?: 0L) - 10000) }
+        initializeController()
+        scope.launch(Dispatchers.Main) {
+            val activeController = controller
+            if (activeController != null) {
+                activeController.seekTo(activeController.currentPosition - 10000)
+            }
+        }
     }
-    
+
     fun release() { 
         abandonSystemAudioFocus()
-        controllerFuture?.let { MediaController.releaseFuture(it) }
-        systemTts.release()
         stopHighlightUpdate() 
-     }
+        controllerFuture?.let {
+            MediaController.releaseFuture(it)
+            controllerFuture = null
+        }
+        systemTts.release()
+    }
 }
