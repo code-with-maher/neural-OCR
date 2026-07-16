@@ -112,6 +112,42 @@ class AudioPlayerController(
         controllerFuture?.addListener({
             try {
                 val currentController = controller
+
+                // إعادة مزامنة الحالة إذا كانت خدمة PlaybackService لا تزال تعمل من نسخة سابقة
+                // (يحدث هذا عند حذف التطبيق من التطبيقات الأخيرة أثناء التشغيل ثم إعادة فتحه،
+                // حيث تُنشأ نسخة جديدة من AudioPlayerController بحالة ابتدائية فارغة بينما
+                // الجلسة الفعلية القديمة ما زالت تشتغل).
+                if (currentController != null && loadedBookId == null) {
+                    val restoredId = currentController.currentMediaItem?.mediaId
+                    if (restoredId != null && restoredId.contains("::")) {
+                        val parts = restoredId.split("::")
+                        val restoredPage = parts.getOrNull(1)?.toIntOrNull()
+                        if (parts.isNotEmpty() && restoredPage != null) {
+                            loadedBookId = parts[0]
+                            loadedPageNum = restoredPage
+                            // قيمة داخلية مؤقتة فقط (وليست من الإعدادات المحفوظة)، الهدف منها
+                            // فقط تفعيل منطق التعامل مع MediaController بدل منطق SYSTEM TTS،
+                            // إلى أن يتم استدعاء playPage() فتُحدَّث القيمة الحقيقية من DataStore.
+                            currentEngine = "RESTORED"
+                            userIntendedToPlay = currentController.isPlaying
+
+                            _audioState.value = when {
+                                currentController.isPlaying -> AudioState.PLAYING
+                                currentController.playbackState == Player.STATE_BUFFERING -> AudioState.PROCESSING
+                                else -> AudioState.PAUSED
+                            }
+                            if (currentController.isPlaying) startHighlightUpdate()
+
+                            // إعادة حساب عدد الفقرات لأجل التظليل (highlight) الصحيح أثناء التشغيل المستعاد
+                            generationScope.launch {
+                                repository.getPageByNumber(loadedBookId!!, loadedPageNum)?.let { page ->
+                                    currentParagraphsCount = page.markdownContent.split("\n\n").filter { it.isNotBlank() }.size
+                                }
+                            }
+                        }
+                    }
+                }
+
                 currentController?.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         if (currentEngine != "SYSTEM") {
@@ -145,13 +181,6 @@ class AudioPlayerController(
                         _errorMessage.value = error.message
                     }
                 })
-                
-                currentController?.let {
-                    if (currentEngine != "SYSTEM") {
-                        _audioState.value = if (it.isPlaying) AudioState.PLAYING else AudioState.PAUSED
-                        if (it.isPlaying) startHighlightUpdate()
-                    }
-                }
             } catch (e: Exception) {
                 _audioState.value = AudioState.ERROR
                 _errorMessage.value = e.message
@@ -195,7 +224,11 @@ class AudioPlayerController(
                     scope.launch(Dispatchers.Main) {
                         val activeController = controller
                         if (activeController != null) {
-                            activeController.setMediaItem(MediaItem.fromUri(it.absolutePath))
+                            val mediaItem = MediaItem.Builder()
+                                .setMediaId("$bookId::$pageNumber")
+                                .setUri(it.absolutePath)
+                                .build()
+                            activeController.setMediaItem(mediaItem)
                             activeController.prepare()
                             activeController.play()
                         }
