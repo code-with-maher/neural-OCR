@@ -47,11 +47,32 @@ class LibraryViewModel(
     var pendingFileUri: Uri? = null
     var pendingTotalPages: Int = 0
     var pendingBookId: String = ""
+    var pendingFileName: String = ""
 
     private var targetFailedBookId: String? = null
 
     fun dismissBottomSheet() { _activeBottomSheet.value = null }
     fun onNavigated() { _readyToNavigateBookId.value = null }
+
+    private fun getFileName(context: Context, uri: Uri): String {
+        var name = ""
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val index = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) {
+                        name = it.getString(index)
+                    }
+                }
+            }
+        }
+        if (name.isBlank()) {
+            name = uri.path?.let { File(it).name } ?: ""
+        }
+        name = if (name.contains(".")) name.substringBeforeLast(".") else name
+        return name.ifBlank { "كتاب جديد" }
+    }
 
     fun prepareBook(context: Context, uri: Uri) {
         viewModelScope.launch {
@@ -81,6 +102,7 @@ class LibraryViewModel(
                 pendingFileUri = safeUri
                 pendingTotalPages = totalPages
                 pendingBookId = UUID.randomUUID().toString()
+                pendingFileName = getFileName(context, safeUri)
                 _activeBottomSheet.value = "RANGE_PICKER"
 
             } catch (e: Exception) {
@@ -99,7 +121,7 @@ class LibraryViewModel(
                 val settings = SettingsManager(context)
                 val apiKey = settings.geminiKey.first()
                 targetFailedBookId = bookId
-                
+
                 if (apiKey.isBlank())  {
                     _activeBottomSheet.value = "MISSING_KEY"
                 } else {
@@ -114,21 +136,22 @@ class LibraryViewModel(
     fun retryFailedBook(context: Context) {
         _activeBottomSheet.value = null
         targetFailedBookId?.let { bookId ->
-            enqueueWorker(context, bookId, 1, 1) // الأرقام لا تهم هنا لأن العامل سيقرأ الـ Chunks
+            enqueueWorker(context, bookId, 1, 1)
         }
     }
 
     fun startExtraction(context: Context, title: String, startPage: Int, endPage: Int) {
         _activeBottomSheet.value = null
-        
+
         viewModelScope.launch {
             try {
+                val selectedTotalPages = (endPage - startPage + 1)
                 val newBook = BookEntity(
                     id = pendingBookId,
-                    title = title.ifBlank { "كتاب جديد" },
+                    title = title.ifBlank { pendingFileName },
                     sourcePdfUri = pendingFileUri.toString(),
-                    totalPages = pendingTotalPages,
-                    lastReadPage = startPage
+                    totalPages = selectedTotalPages,
+                    lastReadPage = 1
                 )
                 repository.insertBook(newBook)
                 enqueueWorker(context, pendingBookId, startPage, endPage)
@@ -144,7 +167,7 @@ class LibraryViewModel(
             .setConstraints(constraints)
             .setInputData(workDataOf("bookId" to bookId, "startPage" to startPage, "endPage" to endPage))
             .build()
-            
+
         WorkManager.getInstance(context).enqueue(workRequest)
         _activeBottomSheet.value = "PROGRESS"
 
@@ -158,7 +181,7 @@ class LibraryViewModel(
                 }
             }
         }
-        
+
         viewModelScope.launch {
             WorkManager.getInstance(context).getWorkInfoByIdFlow(workRequest.id).collect { workInfo ->
                 if (workInfo != null && workInfo.state == WorkInfo.State.FAILED) {
@@ -169,6 +192,6 @@ class LibraryViewModel(
             }
         }
     }
-    
+
     fun clearError() { _errorMessage.value = null  }
 }
