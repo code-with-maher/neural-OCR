@@ -38,6 +38,10 @@ class ReaderViewModel(
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
 
+    init {
+        audioController.connect()
+    }
+
     fun clearToast() { _toastMessage.value = null }
 
     fun loadBook(bookId: String) {
@@ -154,6 +158,6 @@ class ReaderViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        audioController.release()
+        audioController.disconnect()
     }
 }
