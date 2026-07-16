@@ -42,21 +42,14 @@ import java.util.concurrent.TimeUnit
 
 enum class AudioState { IDLE, PROCESSING, PLAYING, PAUSED, ERROR }
 
-/**
- * القيم المخزّنة فعليًا في [SettingsManager.ttsEngine]. موحّدة هنا لتفادي تكرار
- * السلاسل النصية الحرفية ("magic strings") في أكثر من مكان بالملف.
- */
+/** القيم المخزّنة فعليًا في [SettingsManager.ttsEngine]. */
 object TtsEngineId {
     const val SYSTEM = "SYSTEM"
     const val ELEVENLABS = "ELEVENLABS"
     const val GEMINI_TTS = "GEMINI_TTS"
 }
 
-/**
- * أي "محرّك تشغيل" فعلي يتحكّم بالصوت حاليًا. هذا مختلف عن [TtsEngineId]:
- * الأخير هو إعداد المستخدم المحفوظ، بينما هذا يعكس الحالة الحيّة الفعلية،
- * وهو ما تعتمد عليه كل قرارات التوجيه (routing) داخل هذا الملف.
- */
+/** المحرّك الفعلي المتحكّم بالصوت حاليًا (حالة حيّة، وليست إعداد المستخدم). */
 private enum class PlaybackBackend { SYSTEM_TTS, MEDIA3 }
 
 class AudioPlayerController(
@@ -66,7 +59,7 @@ class AudioPlayerController(
 ) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
-    /** وصول متزامن فوري؛ آمن فقط عندما نعلم مسبقًا أن الاتصال مكتمل. */
+    /** وصول متزامن فوري؛ آمن فقط عندما نعلم مسبقًا أن الاتصال مكتمل ونحن على Main thread. */
     private val connectedControllerOrNull: MediaController?
         get() = if (controllerFuture?.isDone == true) controllerFuture?.get() else null
 
@@ -79,8 +72,6 @@ class AudioPlayerController(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    // SupervisorJob في كلا الـ scopes: فشل عملية واحدة (مثلاً seek فاشل) يجب ألا
-    // يُسقط بقية العمليات الجارية (كحلقة تحديث التظليل أو توليد الصوت).
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val generationScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var progressJob: Job? = null
@@ -188,13 +179,12 @@ class AudioPlayerController(
 
     /**
      * تُستدعى فور اكتمال الاتصال بالجلسة. إن كانت خدمة [PlaybackService] لا تزال
-     * تعمل من نسخة سابقة من هذا الكونترولر (مثلًا بعد حذف التطبيق من التطبيقات
-     * الأخيرة، أو مجرد الخروج من شاشة القارئ والعودة إليها) بينما هذه نسخة جديدة
-     * بحالة ابتدائية فارغة، نعيد بناء الحالة من معلومات الـ MediaItem الحالي
-     * بدل تركها IDLE رغم أن الصوت يعمل فعليًا.
+     * تعمل من نسخة سابقة (بعد حذف التطبيق من الأخيرة، أو مجرد العودة لشاشة القارئ)
+     * بينما هذه نسخة جديدة بحالة ابتدائية فارغة، نعيد بناء الحالة من الـ MediaItem
+     * الحالي بدل تركها IDLE رغم أن الصوت يعمل فعليًا.
      */
     private fun restorePlaybackStateIfNeeded(mediaController: MediaController) {
-        if (loadedBookId != null) return // لدينا حالة محمّلة فعلًا، لا حاجة لاستعادة
+        if (loadedBookId != null) return
 
         val (restoredBookId, restoredPage) = mediaController.currentMediaItem
             ?.mediaId
@@ -225,25 +215,30 @@ class AudioPlayerController(
     }
 
     /**
-     * البوابة الموحّدة الوحيدة للوصول إلى [MediaController] في هذا الملف.
-     * تنتظر اكتمال الاتصال فعليًا بدل الاعتماد على isDone فقط (وهو ما كان يسبب
-     * تجاهل أول ضغطة على أزرار التقديم/الترجيع مباشرة بعد إعادة إنشاء الكونترولر)،
-     * وتضمن أن كل وصول للكونترولر يتم على الـ Main thread كما تتطلب Media3.
+     * البوابة الموحّدة والوحيدة للتعامل مع [MediaController] في هذا الملف.
+     *
+     * تنتظر اكتمال الاتصال فعليًا (بدل الاعتماد على isDone فقط)، **وتنفّذ [action]
+     * بأكملها ضمن نفس كتلة الـ withContext(Main)** بدل إرجاع الكونترولر واستخدامه
+     * لاحقًا خارج هذه الكتلة. هذا التصميم يمنع بنيويًا الوقوع في خطأ استدعاء
+     * MediaController من thread خاطئ، بغض النظر عن الـ dispatcher الذي استُدعيت
+     * منه هذه الدالة (Main أو IO).
      */
-    private suspend fun awaitController(): MediaController? = withContext(Dispatchers.Main) {
-        initializeController()
-        val future = controllerFuture ?: return@withContext null
-        if (future.isDone) {
-            try { future.get() } catch (e: Exception) { null }
-        } else {
-            suspendCancellableCoroutine { cont ->
-                future.addListener({
-                    val result = try { future.get() } catch (e: Exception) { null }
-                    if (cont.isActive) cont.resume(result, onCancellation = null)
-                }, MoreExecutors.directExecutor())
+    private suspend fun <T> withController(action: MediaController.() -> T): T? =
+        withContext(Dispatchers.Main) {
+            initializeController()
+            val future = controllerFuture ?: return@withContext null
+            val mediaController = if (future.isDone) {
+                try { future.get() } catch (e: Exception) { null }
+            } else {
+                suspendCancellableCoroutine { cont ->
+                    future.addListener({
+                        val result = try { future.get() } catch (e: Exception) { null }
+                        if (cont.isActive) cont.resume(result, onCancellation = null)
+                    }, MoreExecutors.directExecutor())
+                }
             }
+            mediaController?.action()
         }
-    }
 
     // ------------------------------------------------------------------
     // التشغيل
@@ -286,9 +281,8 @@ class AudioPlayerController(
     }
 
     private suspend fun startSystemTts(page: PageEntity) {
-        withContext(Dispatchers.Main) { awaitController()?.pause() }
-        systemTts.stop(manual = true) // ضمان عدم تراكب أي تشغيل سابق
-        abandonMedia3Focus = false
+        withController { pause() } // إيقاف أي تشغيل Media3 سابق قبل التحويل لمحرك النظام
+        systemTts.stop(manual = true)
         requestSystemAudioFocus()
         systemTts.speak(page.markdownContent)
     }
@@ -298,15 +292,17 @@ class AudioPlayerController(
         abandonSystemAudioFocus()
 
         val audioFile = getAudioFile(page, bookId, pageNumber, engineId) ?: return
-        val activeController = awaitController() ?: return
 
-        val mediaItem = MediaItem.Builder()
-            .setMediaId("$bookId::$pageNumber")
-            .setUri(audioFile.absolutePath)
-            .build()
-        activeController.setMediaItem(mediaItem)
-        activeController.prepare()
-        activeController.play()
+        withController {
+            setMediaItem(
+                MediaItem.Builder()
+                    .setMediaId("$bookId::$pageNumber")
+                    .setUri(audioFile.absolutePath)
+                    .build()
+            )
+            prepare()
+            play()
+        }
     }
 
     private suspend fun getAudioFile(page: PageEntity, bookId: String, pageNumber: Int, engineId: String): File? {
@@ -346,7 +342,7 @@ class AudioPlayerController(
     private suspend fun pauseInternal() {
         when (activeBackend) {
             PlaybackBackend.SYSTEM_TTS -> systemTts.stop(manual = !userIntendedToPlay)
-            PlaybackBackend.MEDIA3 -> withContext(Dispatchers.Main) { awaitController()?.pause() }
+            PlaybackBackend.MEDIA3 -> withController { pause() }
         }
     }
 
@@ -356,7 +352,7 @@ class AudioPlayerController(
                 requestSystemAudioFocus()
                 systemTts.resume()
             }
-            PlaybackBackend.MEDIA3 -> withContext(Dispatchers.Main) { awaitController()?.play() }
+            PlaybackBackend.MEDIA3 -> withController { play() }
         }
     }
 
@@ -369,9 +365,9 @@ class AudioPlayerController(
 
     private fun seekBy(deltaMs: Long) {
         scope.launch {
-            val activeController = awaitController() ?: return@launch
-            val target = (activeController.currentPosition + deltaMs).coerceAtLeast(0)
-            activeController.seekTo(target)
+            withController {
+                seekTo((currentPosition + deltaMs).coerceAtLeast(0))
+            }
         }
     }
 
@@ -402,8 +398,6 @@ class AudioPlayerController(
     // ------------------------------------------------------------------
     // Audio Focus (لمحرك SYSTEM TTS فقط)
     // ------------------------------------------------------------------
-
-    private var abandonMedia3Focus = false // محجوزة لتوسعات مستقبلية عند الحاجة لـ focus خاص بـ Media3
 
     private fun requestSystemAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -476,9 +470,9 @@ class AudioPlayerController(
     }
 
     /**
-     * يجب استدعاؤها دائمًا عند انتهاء الحاجة لهذا الكائن (مثلًا من onCleared في
-     * الـ ViewModel) لتجنّب تسريب الذاكرة: تُلغي كل الـ coroutines الجارية عبر
-     * إغلاق الـ scopes، وتُحرر الاتصال بالجلسة ومحرك SYSTEM TTS.
+     * يجب استدعاؤها دائمًا عند انتهاء الحاجة لهذا الكائن (من onCleared في الـ
+     * ViewModel) لتجنّب تسريب الذاكرة: تُلغي كل الـ coroutines الجارية عبر إغلاق
+     * الـ scopes، وتُحرر الاتصال بالجلسة ومحرك SYSTEM TTS.
      */
     fun release() {
         abandonSystemAudioFocus()
