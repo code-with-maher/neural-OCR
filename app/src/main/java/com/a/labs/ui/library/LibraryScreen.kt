@@ -76,11 +76,17 @@ fun LibraryScreen(
                         var endPageStr by remember { mutableStateOf(viewModel.pendingTotalPages.toString()) }
                         var title by remember { mutableStateOf("") }
 
+                        LaunchedEffect(activeBottomSheet) {
+                            if (activeBottomSheet == "RANGE_PICKER") {
+                                title = viewModel.pendingFileName
+                            }
+                        }
+
                         Text("إعدادات المعالجة", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Text("يحتوي الملف على ${viewModel.pendingTotalPages} صفحة.")
                         OutlinedTextField(
                             value = title, onValueChange = { title = it },
-                            label = { Text("اسم الكتاب (اختياري)") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                            label = { Text("اسم الكتاب") }, singleLine = true, modifier = Modifier.fillMaxWidth()
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
@@ -104,7 +110,7 @@ fun LibraryScreen(
                             }) { Text("بدء المعالجة") }
                         }
                     }
-                    
+
                     "MISSING_KEY" -> {
                         Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
                         Text("مفتاح Gemini مفقود", fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -188,5 +194,5 @@ fun LibraryScreen(
                 }
             }
         }
-      }
+    }
 }
