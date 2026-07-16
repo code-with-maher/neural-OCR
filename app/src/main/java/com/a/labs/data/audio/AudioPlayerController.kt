@@ -59,7 +59,6 @@ class AudioPlayerController(
 ) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
-    /** وصول متزامن فوري؛ آمن فقط عندما نعلم مسبقًا أن الاتصال مكتمل ونحن على Main thread. */
     private val connectedControllerOrNull: MediaController?
         get() = if (controllerFuture?.isDone == true) controllerFuture?.get() else null
 
@@ -133,9 +132,19 @@ class AudioPlayerController(
         if (controllerFuture != null && controllerFuture?.isCancelled == false) return
 
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        controllerFuture = MediaController.Builder(context, sessionToken).buildAsync().also { future ->
-            future.addListener({ onControllerConnected(future) }, MoreExecutors.directExecutor())
-        }
+        controllerFuture = MediaController.Builder(context, sessionToken)
+            .setListener(object : MediaController.Listener {
+                // الجلسة انقطعت فعليًا (مثلًا بعد فترة في الخلفية) رغم أن الـ future
+                // القديم لا يزال "مكتملًا" ظاهريًا. بدون هذا، تستمر كل الأزرار
+                // بإرسال أوامر لكونترولر ميت بصمت دون أي تأثير أو خطأ.
+                override fun onDisconnected(controller: MediaController) {
+                    controllerFuture = null
+                }
+            })
+            .buildAsync()
+            .also { future ->
+                future.addListener({ onControllerConnected(future) }, MoreExecutors.directExecutor())
+            }
     }
 
     private fun onControllerConnected(future: ListenableFuture<MediaController>) {
@@ -145,7 +154,7 @@ class AudioPlayerController(
             return
         }
 
-        restorePlaybackStateIfNeeded(mediaController)
+        syncStateFromController(mediaController)
 
         mediaController.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -178,50 +187,54 @@ class AudioPlayerController(
     }
 
     /**
-     * تُستدعى فور اكتمال الاتصال بالجلسة. إن كانت خدمة [PlaybackService] لا تزال
-     * تعمل من نسخة سابقة (بعد حذف التطبيق من الأخيرة، أو مجرد العودة لشاشة القارئ)
-     * بينما هذه نسخة جديدة بحالة ابتدائية فارغة، نعيد بناء الحالة من الـ MediaItem
-     * الحالي بدل تركها IDLE رغم أن الصوت يعمل فعليًا.
+     * تُستدعى في كل اتصال ناجح (الأول، أو أي إعادة اتصال بعد انقطاع). مسؤوليتان:
+     *
+     * 1) إن لم تكن هناك صفحة محمّلة محليًا بعد ([loadedBookId] فارغة)، نحاول
+     *    استخراجها من الـ MediaItem الحالي للجلسة — يحدث هذا عند إنشاء نسخة جديدة
+     *    من هذا الكائن بينما الجلسة القديمة (PlaybackService) لا تزال تعمل، مثل
+     *    حذف التطبيق من الأخيرة، أو الخروج من شاشة القارئ والعودة إليها.
+     * 2) بغض النظر عن الحالة السابقة، إن كان المحرك الفعّال Media3، نُزامن حالة
+     *    الواجهة مع الحالة *الحقيقية* للمشغّل الآن. هذه الخطوة ضرورية أيضًا عند
+     *    إعادة الاتصال بعد انقطاع، لأن Player.Listener لا يُطلق تلقائيًا بحالة
+     *    "الآن" عند إضافته، بل فقط عند حدوث تغيير لاحق.
      */
-    private fun restorePlaybackStateIfNeeded(mediaController: MediaController) {
-        if (loadedBookId != null) return
+    private fun syncStateFromController(mediaController: MediaController) {
+        if (loadedBookId == null) {
+            val (restoredBookId, restoredPage) = mediaController.currentMediaItem
+                ?.mediaId
+                ?.split("::")
+                ?.takeIf { it.size == 2 }
+                ?.let { it[0] to it[1].toIntOrNull() }
+                ?: return
 
-        val (restoredBookId, restoredPage) = mediaController.currentMediaItem
-            ?.mediaId
-            ?.split("::")
-            ?.takeIf { it.size == 2 }
-            ?.let { it[0] to it[1].toIntOrNull() }
-            ?: return
+            if (restoredPage == null) return
 
-        if (restoredPage == null) return
+            loadedBookId = restoredBookId
+            loadedPageNum = restoredPage
+            activeBackend = PlaybackBackend.MEDIA3
 
-        loadedBookId = restoredBookId
-        loadedPageNum = restoredPage
-        activeBackend = PlaybackBackend.MEDIA3
+            generationScope.launch {
+                repository.getPageByNumber(restoredBookId, restoredPage)?.let { page ->
+                    currentParagraphsCount = page.markdownContent.split("\n\n").count { it.isNotBlank() }
+                }
+            }
+        }
+
+        if (activeBackend != PlaybackBackend.MEDIA3) return
+
         userIntendedToPlay = mediaController.isPlaying
-
         _audioState.value = when {
             mediaController.isPlaying -> AudioState.PLAYING
             mediaController.playbackState == Player.STATE_BUFFERING -> AudioState.PROCESSING
             else -> AudioState.PAUSED
         }
-        if (mediaController.isPlaying) startHighlightUpdate()
-
-        generationScope.launch {
-            repository.getPageByNumber(restoredBookId, restoredPage)?.let { page ->
-                currentParagraphsCount = page.markdownContent.split("\n\n").count { it.isNotBlank() }
-            }
-        }
+        if (mediaController.isPlaying) startHighlightUpdate() else stopHighlightUpdate()
     }
 
     /**
      * البوابة الموحّدة والوحيدة للتعامل مع [MediaController] في هذا الملف.
-     *
-     * تنتظر اكتمال الاتصال فعليًا (بدل الاعتماد على isDone فقط)، **وتنفّذ [action]
-     * بأكملها ضمن نفس كتلة الـ withContext(Main)** بدل إرجاع الكونترولر واستخدامه
-     * لاحقًا خارج هذه الكتلة. هذا التصميم يمنع بنيويًا الوقوع في خطأ استدعاء
-     * MediaController من thread خاطئ، بغض النظر عن الـ dispatcher الذي استُدعيت
-     * منه هذه الدالة (Main أو IO).
+     * تنتظر اكتمال الاتصال فعليًا، وتنفّذ [action] بأكملها ضمن نفس كتلة
+     * withContext(Main)، فيستحيل بنيويًا استدعاء MediaController من thread خاطئ.
      */
     private suspend fun <T> withController(action: MediaController.() -> T): T? =
         withContext(Dispatchers.Main) {
@@ -245,7 +258,7 @@ class AudioPlayerController(
     // ------------------------------------------------------------------
 
     fun playPage(bookId: String, pageNumber: Int) {
-        initializeController() // بدء الاتصال فورًا وبأقصى سرعة، دون انتظار الكود أدناه
+        initializeController()
         generationScope.launch {
             val engineId = settingsManager.ttsEngine.first()
             activeBackend = if (engineId == TtsEngineId.SYSTEM) PlaybackBackend.SYSTEM_TTS else PlaybackBackend.MEDIA3
@@ -281,7 +294,7 @@ class AudioPlayerController(
     }
 
     private suspend fun startSystemTts(page: PageEntity) {
-        withController { pause() } // إيقاف أي تشغيل Media3 سابق قبل التحويل لمحرك النظام
+        withController { pause() }
         systemTts.stop(manual = true)
         requestSystemAudioFocus()
         systemTts.speak(page.markdownContent)
@@ -469,11 +482,6 @@ class AudioPlayerController(
         _errorMessage.value = null
     }
 
-    /**
-     * يجب استدعاؤها دائمًا عند انتهاء الحاجة لهذا الكائن (من onCleared في الـ
-     * ViewModel) لتجنّب تسريب الذاكرة: تُلغي كل الـ coroutines الجارية عبر إغلاق
-     * الـ scopes، وتُحرر الاتصال بالجلسة ومحرك SYSTEM TTS.
-     */
     fun release() {
         abandonSystemAudioFocus()
         stopHighlightUpdate()
