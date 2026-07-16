@@ -42,25 +42,26 @@ import java.util.concurrent.TimeUnit
 
 enum class AudioState { IDLE, PROCESSING, PLAYING, PAUSED, ERROR }
 
-/** القيم المخزّنة فعليًا في [SettingsManager.ttsEngine]. */
 object TtsEngineId {
     const val SYSTEM = "SYSTEM"
     const val ELEVENLABS = "ELEVENLABS"
     const val GEMINI_TTS = "GEMINI_TTS"
 }
 
-/** المحرّك الفعلي المتحكّم بالصوت حاليًا (حالة حيّة، وليست إعداد المستخدم). */
 private enum class PlaybackBackend { SYSTEM_TTS, MEDIA3 }
 
 class AudioPlayerController(
-    private val context: Context,
+    context: Context,
     private val repository: BookRepository,
     private val settingsManager: SettingsManager
 ) {
+    private val appContext = context.applicationContext
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     private val connectedControllerOrNull: MediaController?
-        get() = if (controllerFuture?.isDone == true) controllerFuture?.get() else null
+        get() = if (controllerFuture?.isDone == true) {
+            try { controllerFuture?.get() } catch (e: Exception) { null }
+        } else null
 
     private val _audioState = MutableStateFlow(AudioState.IDLE)
     val audioState: StateFlow<AudioState> = _audioState.asStateFlow()
@@ -81,8 +82,8 @@ class AudioPlayerController(
     private var currentParagraphsCount: Int = 1
     private var userIntendedToPlay = false
 
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         if (activeBackend == PlaybackBackend.SYSTEM_TTS) {
@@ -105,7 +106,7 @@ class AudioPlayerController(
         }
     }
 
-    private val systemTts = SystemTtsWrapper(context).apply {
+    private val systemTts = SystemTtsWrapper(appContext).apply {
         onPlaybackStateChanged = { playing ->
             _audioState.value = if (playing) AudioState.PLAYING else AudioState.PAUSED
         }
@@ -121,22 +122,18 @@ class AudioPlayerController(
 
     init {
         createNotificationChannel()
-        initializeController()
+        connect()
     }
 
-    // ------------------------------------------------------------------
-    // اتصال الجلسة (Session) والمزامنة
-    // ------------------------------------------------------------------
+    fun connect() {
+        if (controllerFuture != null && controllerFuture?.isCancelled == false) {
+            connectedControllerOrNull?.let { syncStateFromController(it) }
+            return
+        }
 
-    private fun initializeController() {
-        if (controllerFuture != null && controllerFuture?.isCancelled == false) return
-
-        val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        controllerFuture = MediaController.Builder(context, sessionToken)
+        val sessionToken = SessionToken(appContext, ComponentName(appContext, PlaybackService::class.java))
+        controllerFuture = MediaController.Builder(appContext, sessionToken)
             .setListener(object : MediaController.Listener {
-                // الجلسة انقطعت فعليًا (مثلًا بعد فترة في الخلفية) رغم أن الـ future
-                // القديم لا يزال "مكتملًا" ظاهريًا. بدون هذا، تستمر كل الأزرار
-                // بإرسال أوامر لكونترولر ميت بصمت دون أي تأثير أو خطأ.
                 override fun onDisconnected(controller: MediaController) {
                     controllerFuture = null
                 }
@@ -186,18 +183,6 @@ class AudioPlayerController(
         })
     }
 
-    /**
-     * تُستدعى في كل اتصال ناجح (الأول، أو أي إعادة اتصال بعد انقطاع). مسؤوليتان:
-     *
-     * 1) إن لم تكن هناك صفحة محمّلة محليًا بعد ([loadedBookId] فارغة)، نحاول
-     *    استخراجها من الـ MediaItem الحالي للجلسة — يحدث هذا عند إنشاء نسخة جديدة
-     *    من هذا الكائن بينما الجلسة القديمة (PlaybackService) لا تزال تعمل، مثل
-     *    حذف التطبيق من الأخيرة، أو الخروج من شاشة القارئ والعودة إليها.
-     * 2) بغض النظر عن الحالة السابقة، إن كان المحرك الفعّال Media3، نُزامن حالة
-     *    الواجهة مع الحالة *الحقيقية* للمشغّل الآن. هذه الخطوة ضرورية أيضًا عند
-     *    إعادة الاتصال بعد انقطاع، لأن Player.Listener لا يُطلق تلقائيًا بحالة
-     *    "الآن" عند إضافته، بل فقط عند حدوث تغيير لاحق.
-     */
     private fun syncStateFromController(mediaController: MediaController) {
         if (loadedBookId == null) {
             val (restoredBookId, restoredPage) = mediaController.currentMediaItem
@@ -231,14 +216,9 @@ class AudioPlayerController(
         if (mediaController.isPlaying) startHighlightUpdate() else stopHighlightUpdate()
     }
 
-    /**
-     * البوابة الموحّدة والوحيدة للتعامل مع [MediaController] في هذا الملف.
-     * تنتظر اكتمال الاتصال فعليًا، وتنفّذ [action] بأكملها ضمن نفس كتلة
-     * withContext(Main)، فيستحيل بنيويًا استدعاء MediaController من thread خاطئ.
-     */
     private suspend fun <T> withController(action: MediaController.() -> T): T? =
         withContext(Dispatchers.Main) {
-            initializeController()
+            connect()
             val future = controllerFuture ?: return@withContext null
             val mediaController = if (future.isDone) {
                 try { future.get() } catch (e: Exception) { null }
@@ -253,12 +233,8 @@ class AudioPlayerController(
             mediaController?.action()
         }
 
-    // ------------------------------------------------------------------
-    // التشغيل
-    // ------------------------------------------------------------------
-
     fun playPage(bookId: String, pageNumber: Int) {
-        initializeController()
+        connect()
         generationScope.launch {
             val engineId = settingsManager.ttsEngine.first()
             activeBackend = if (engineId == TtsEngineId.SYSTEM) PlaybackBackend.SYSTEM_TTS else PlaybackBackend.MEDIA3
@@ -330,12 +306,12 @@ class AudioPlayerController(
             TtsEngineId.ELEVENLABS -> {
                 val apiKey = settingsManager.elevenKey.first()
                 val voiceId = settingsManager.elevenVoiceId.first()
-                ElevenLabsClient(context, httpClient, apiKey)
+                ElevenLabsClient(appContext, httpClient, apiKey)
                     .generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber", voiceId)
             }
             else -> {
                 val apiKey = settingsManager.geminiKey.first()
-                GeminiTtsClient(context, httpClient, apiKey)
+                GeminiTtsClient(appContext, httpClient, apiKey)
                     .generateSpeech(page.markdownContent, "audio_${bookId}_$pageNumber")
             }
         }
@@ -369,10 +345,6 @@ class AudioPlayerController(
         }
     }
 
-    // ------------------------------------------------------------------
-    // التقديم / الترجيع
-    // ------------------------------------------------------------------
-
     fun seekForward() = seekBy(SEEK_STEP_MS)
     fun seekBackward() = seekBy(-SEEK_STEP_MS)
 
@@ -383,10 +355,6 @@ class AudioPlayerController(
             }
         }
     }
-
-    // ------------------------------------------------------------------
-    // التظليل التدريجي أثناء التشغيل (Highlight)
-    // ------------------------------------------------------------------
 
     private fun startHighlightUpdate() {
         progressJob?.cancel()
@@ -407,10 +375,6 @@ class AudioPlayerController(
     }
 
     private fun stopHighlightUpdate() = progressJob?.cancel()
-
-    // ------------------------------------------------------------------
-    // Audio Focus (لمحرك SYSTEM TTS فقط)
-    // ------------------------------------------------------------------
 
     private fun requestSystemAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -445,16 +409,12 @@ class AudioPlayerController(
                     .setAudioAttributes(attributes)
                     .setOnAudioFocusChangeListener(focusChangeListener)
                     .build()
-            )
+                )
         } else {
             @Suppress("DEPRECATION")
             audioManager.abandonAudioFocus(focusChangeListener)
         }
     }
-
-    // ------------------------------------------------------------------
-    // الإشعارات
-    // ------------------------------------------------------------------
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -465,8 +425,8 @@ class AudioPlayerController(
     }
 
     private fun showGenerationNotification() {
-        val notification = NotificationCompat.Builder(context, GENERATION_NOTIFICATION_CHANNEL)
-            .setContentTitle(context.getString(R.string.app_name))
+        val notification = NotificationCompat.Builder(appContext, GENERATION_NOTIFICATION_CHANNEL)
+            .setContentTitle(appContext.getString(R.string.app_name))
             .setContentText("جاري توليد الصوت...")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
@@ -474,21 +434,23 @@ class AudioPlayerController(
         notificationManager.notify(GENERATION_NOTIFICATION_ID, notification)
     }
 
-    // ------------------------------------------------------------------
-    // دورة الحياة
-    // ------------------------------------------------------------------
-
     fun clearError() {
         _errorMessage.value = null
     }
 
-    fun release() {
+    fun disconnect() {
         abandonSystemAudioFocus()
         stopHighlightUpdate()
+        systemTts.stop(manual = true)
+        progressJob?.cancel()
         controllerFuture?.let {
             MediaController.releaseFuture(it)
             controllerFuture = null
         }
+    }
+
+    fun release() {
+        disconnect()
         systemTts.release()
         scope.cancel()
         generationScope.cancel()
