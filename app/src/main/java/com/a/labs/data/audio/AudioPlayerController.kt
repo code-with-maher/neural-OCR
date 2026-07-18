@@ -39,6 +39,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 enum class AudioState { IDLE, PROCESSING, PLAYING, PAUSED, ERROR }
 
@@ -226,7 +227,7 @@ class AudioPlayerController(
                 suspendCancellableCoroutine { cont ->
                     future.addListener({
                         val result = try { future.get() } catch (e: Exception) { null }
-                        if (cont.isActive) cont.resume(result, onCancellation = null)
+                        if (cont.isActive) cont.resume(result)
                     }, MoreExecutors.directExecutor())
                 }
             }
