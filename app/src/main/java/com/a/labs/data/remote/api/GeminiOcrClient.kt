@@ -85,7 +85,7 @@ class GeminiOcrClient(
 
             val request = Request.Builder().url(url).post(requestBody).build()
             val response = client.newCall(request).execute()
-            val responseString = response.body?.string() ?: ""
+            val responseString = response.body.string()
 
             if (response.isSuccessful && responseString.isNotEmpty()) {
                 val geminiResponse = jsonConfig.decodeFromString<GeminiResponse>(responseString)
