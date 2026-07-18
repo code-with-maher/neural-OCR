@@ -82,9 +82,9 @@ class GeminiTtsClient(
                 .url(url)
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
-                
+
             val response = client.newCall(request).execute()
-            val responseString = response.body?.string() ?: ""
+            val responseString = response.body.string()
 
             if (response.isSuccessful && responseString.isNotEmpty()) {
                 val ttsResponse = jsonConfig.decodeFromString<TtsResponse>(responseString)
@@ -123,7 +123,7 @@ class GeminiTtsClient(
             put("data".toByteArray())
             putInt(pcmData.size)
         }.array()
-        
+
         FileOutputStream(file).use { output ->
             output.write(header)
             output.write(pcmData)
