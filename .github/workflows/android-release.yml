@@ -19,7 +19,7 @@ jobs:
           java-version: '25'
 
       - name: 🐘 Setup Gradle Official Action
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v4
 
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
@@ -41,8 +41,8 @@ jobs:
       - name: ✈️ Notify Telegram
         if: success()
         env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_TOKEN: "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          CHAT_ID: "${{ secrets.TELEGRAM_CHAT_ID }}"
         run: |
-          APK_PATH=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
-          curl -F chat_id="${CHAT_ID}" -F document=@"${APK_PATH}" -F caption="🚀 تم بناء نسخة الـ Release بنجاح يا ماهر!" https://api.telegram.org/bot${BOT_TOKEN}/sendDocument
+          pip install requests --break-system-packages
+          python3 notify_telegram.py
