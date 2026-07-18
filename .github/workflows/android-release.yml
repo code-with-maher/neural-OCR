@@ -19,15 +19,8 @@ jobs:
           java-version: '25'
           cache: 'gradle'
 
-      - name: ⚡ Cache Project-Level Build Metadata
-        uses: actions/cache@v6
-        with:
-          path: |
-            .gradle/configuration-cache
-            .kotlin/compileKotlin
-          key: ${{ runner.os }}-kotlin-config-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', 'gradle.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-kotlin-config-
+      - name: ⚡ Setup Gradle Cache (The Pro Way)
+        uses: gradle/actions/setup-gradle@v4
 
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
@@ -43,7 +36,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: ✈️ Notify Telegram (Python Script Reverted)
+          - name: ✈️ Notify Telegram (Python Script Reverted)
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
