@@ -17,10 +17,18 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '25'
-          cache: 'gradle'
 
-      - name: ⚡ Setup Gradle Cache (The Pro Way)
-        uses: gradle/actions/setup-gradle@v6
+      - name: 🗄️ Manual Open-Source Gradle Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            .gradle/build-cache-1
+            .gradle/configuration-cache
+          key: ${{ runner.os }}-gradle-manual-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', 'gradle.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-manual-
 
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
@@ -28,7 +36,6 @@ jobs:
       - name: 🔨 Execute Build (Turbo Mode)
         run: |
           chmod +x ./gradlew
-          # تم الإبقاء على الـ Daemon والـ الكاش المتطور لسرعة المعالجة الداخلية
           ./gradlew assembleRelease --build-cache --configuration-cache --parallel --console=plain -w
         env:
           KEYSTORE_PATH: ../release.jks
@@ -41,7 +48,6 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        # العودة إلى سكريبت البايثون الخاص بك لإرسال آمن ومستقر للـ Secrets
         run: |
           pip install requests
           python3 notify_telegram.py
