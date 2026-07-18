@@ -17,18 +17,7 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '25'
-
-      - name: 🗄️ Manual Open-Source Gradle Cache
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            .gradle/build-cache-1
-            .gradle/configuration-cache
-          key: ${{ runner.os }}-gradle-manual-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', 'gradle.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-manual-
+          cache: 'gradle'
 
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
