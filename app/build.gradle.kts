@@ -39,23 +39,20 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("mainConfig")
-
-            isMinifyEnabled = false
-            isShrinkResources = false
+            applicationIdSuffix = ".debug"
             isDebuggable = true
 
-            applicationIdSuffix = ".debug"
+            optimization {
+                enable = false
+            }
         }
 
         release {
             signingConfig = signingConfigs.getByName("mainConfig")
 
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            optimization {
+                enable = true
+            }
         }
     }
 
@@ -64,14 +61,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_25
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
-        }
-    }
-
     buildFeatures {
         compose = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
     }
 }
 
