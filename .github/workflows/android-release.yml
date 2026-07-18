@@ -9,15 +9,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🛰️ Checkout Code (v7)
+      - name: 🛰️ Checkout Code
         uses: actions/checkout@v7
 
+      # Gradle 9.1.0+ يوفر دعمًا كاملاً ومُختبرًا لـ JDK 25 (أحدث إصدار LTS)،
+      # وAGP 9.3.0 متوافق معه. JDK 26 يعمل تقنيًا لكن نتجنبه لأنه ليس LTS بعد.
       - name: ☕ Setup Java 25
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '25'
-          cache: 'gradle'
+          # لا نستخدم cache: 'gradle' هنا لأننا نتحكم بالكاش يدويًا أدناه
+          # بشكل أدق ليغطي configuration-cache و build-cache أيضًا.
+
+      # كاش مخصص لبناء الـ Release فقط (منفصل عن أي كاش لبناءات Debug)
+      # لتفادي تسرب نواتج غير متوافقة مع التوقيع/الإصدار (cache poisoning).
+      - name: 🗄️ Gradle Cache (Release-specific)
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.gradle/notifications
+            .gradle/configuration-cache
+            .gradle/build-cache-1
+          key: ${{ runner.os }}-gradle-release-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle.properties', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-release-
 
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
@@ -32,11 +50,17 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: ✈️ Notify Telegram (Python Script Reverted)
+      # حذف الـ keystore فور انتهاء البناء حتى لا يبقى على القرص
+      # أو يُلتقط بالخطأ ضمن أي كاش أو artifact لاحق.
+      - name: 🧹 Cleanup Keystore
+        if: always()
+        run: rm -f release.jks
+
+      - name: ✈️ Notify Telegram
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          pip install requests
+          pip install requests --break-system-packages
           python3 notify_telegram.py
