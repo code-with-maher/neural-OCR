@@ -12,3 +12,4 @@ class GeminiOCRApp : Application() {
         Thread.setDefaultUncaughtExceptionHandler(GlobalCrashHandler(this, defaultHandler))
     }
 }
+
