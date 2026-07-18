@@ -130,7 +130,7 @@ class PdfExtractionWorker(
                         repository.updateChunkStatus(chunk.id, "PROCESSING", fileUri, expirationTime)
                     }
 
-                    val ocrResult = ocrClient.extractTextFromPdfUri(fileUri!!, systemPrompt, userPrompt)
+                    val ocrResult = ocrClient.extractTextFromPdfUri(fileUri, systemPrompt, userPrompt)
 
                     if (ocrResult.isFailure) {
                         throw ocrResult.exceptionOrNull() ?: Exception("خطأ غير معروف من جيميناي")
