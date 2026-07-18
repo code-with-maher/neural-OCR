@@ -1,2 +1,0 @@
--keepattributes Signature, *Annotation*, EnclosingMethod, InnerClasses
--dontwarn com.tom_roush.pdfbox.**
