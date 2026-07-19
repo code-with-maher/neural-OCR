@@ -27,7 +27,7 @@ jobs:
             ~/.gradle/notifications
             .gradle/configuration-cache
             .gradle/build-cache-1
-          key: ${{ runner.os }}-gradle-release-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle.properties', 'gradle/libs.versions.toml') }}
+          key: ${{ runner.os }}-gradle-release-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-gradle-release-
 
