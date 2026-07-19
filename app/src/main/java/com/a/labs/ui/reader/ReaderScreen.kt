@@ -219,7 +219,7 @@ fun ReaderScreen(
                     modifier = Modifier.padding(32.dp)
                 ) {
                     if (isFailed) {
-                        Icon(Icons.Default.ErrorOutline, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.error)
+                        Icon(Icons.Default.ErrorOutline, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
                         Text("توقفت المعالجة", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                         Text("واجه التطبيق مشكلة أثناء استخراج نصوص هذا الكتاب.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.outline)
                         Button(onClick = { navController.popBackStack() }) {
