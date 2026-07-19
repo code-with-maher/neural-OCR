@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -190,8 +191,15 @@ fun ReaderScreen(
         },
         bottomBar = {
             Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp), 
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(), 
+                        horizontalArrangement = Arrangement.SpaceEvenly, 
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         IconButton(onClick = { viewModel.prevPage() }) {
                             Icon(Icons.Default.SkipPrevious, contentDescription = "الصفحة السابقة")
                         }
@@ -199,35 +207,61 @@ fun ReaderScreen(
                             Icon(Icons.Default.Replay10, contentDescription = "تراجع 10 ثواني")
                         }
 
+                        // هيكلية زر التشغيل الجديد الاحترافي والنص الديناميكي التابع له
                         val btnText = when (audioState) {
                             AudioState.PROCESSING -> "جاري المعالجة"
-                            AudioState.PLAYING -> "إيقاف"
+                            AudioState.PLAYING -> "إيقاف مؤقت"
                             else -> "تشغيل"
                         }
 
-                        ExtendedFloatingActionButton(
-                            onClick = { 
-                                if (audioState == AudioState.PROCESSING) {
-                                    activeBottomSheet = "PROCESSING_ALERT"
-                                } else {
-                                    viewModel.playAudio()
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            FilledIconButton(
+                                onClick = { 
+                                    if (audioState == AudioState.PROCESSING) {
+                                        activeBottomSheet = "PROCESSING_ALERT"
+                                    } else {
+                                        viewModel.playAudio()
+                                    }
+                                },
+                                modifier = Modifier.size(56.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = if (audioState == AudioState.PROCESSING) 
+                                        MaterialTheme.colorScheme.secondaryContainer 
+                                    else 
+                                        MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Crossfade(targetState = audioState, label = "AudioButtonAnimation") { state ->
+                                    when (state) {
+                                        AudioState.PROCESSING -> {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp), 
+                                                strokeWidth = 2.5.dp,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                        AudioState.PLAYING -> {
+                                            Icon(Icons.Default.Pause, contentDescription = "إيقاف مؤقت")
+                                        }
+                                        else -> {
+                                            Icon(Icons.Default.PlayArrow, contentDescription = "تشغيل")
+                                        }
+                                    }
                                 }
-                            },
-                            modifier = Modifier.clearAndSetSemantics {
-                                role = Role.Button
-                                contentDescription = btnText
-                                liveRegion = LiveRegionMode.Polite
-                            },
-                            containerColor = if (audioState == AudioState.PROCESSING) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
-                            icon = {
-                                when (audioState) {
-                                    AudioState.PROCESSING -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                                    AudioState.PLAYING -> Icon(Icons.Default.Pause, null)
-                                    else -> Icon(Icons.Default.PlayArrow, null)
-                                }
-                            },
-                            text = { Text(btnText, fontWeight = FontWeight.Bold) }
-                        )
+                            }
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                text = btnText,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
 
                         IconButton(onClick = { viewModel.audioController.seekForward() }) {
                             Icon(Icons.Default.Forward10, contentDescription = "تقديم 10 ثواني")
@@ -236,10 +270,15 @@ fun ReaderScreen(
                             Icon(Icons.Default.SkipNext, contentDescription = "الصفحة التالية")
                         }
                     }
+                    
                     Spacer(Modifier.height(8.dp))
+                    
+                    // إصلاح التسهيل (Accessibility): نطق التغييرات فوراً وجعل النص تفاعلياً كعنوان
                     Text(
                         text = "صفحة $currentPageNumber من ${book?.totalPages ?: "?"}",
                         modifier = Modifier.semantics {
+                            heading()
+                            liveRegion = LiveRegionMode.Polite
                             contentDescription = "صفحة $currentPageNumber من أصل ${book?.totalPages ?: "غير محدد"}"
                         }
                     )
