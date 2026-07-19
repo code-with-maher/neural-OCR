@@ -126,7 +126,7 @@ fun ReaderScreen(
                     "PROCESSING_ALERT" -> {
                         Icon(Icons.Default.Memory, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                         Text("الذكاء الاصطناعي في خضم العمل!", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text("نقوم حالياً بتهيئة وهندسة النصوص صوتياً في الخلفية لضمان تجربة استماع مثالية. هل تود إيقاف هذه العملية？", textAlign = TextAlign.Center)
+                        Text("نقوم حالياً بتهيئة وهندسة النصوص صوتياً في الخلفية لضمان تجربة استماع مثالية. هل تود إيقاف هذه العملية؟", textAlign = TextAlign.Center)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = { activeBottomSheet = null }) { 
                                 Text("لا، دعه يستمر بالإبداع") 
@@ -217,7 +217,6 @@ fun ReaderScreen(
                                 role = Role.Button
                                 contentDescription = btnText
                                 liveRegion = LiveRegionMode.Polite
-                                importantForAccessibility = ImportantForAccessibility.Yes
                             },
                             containerColor = if (audioState == AudioState.PROCESSING) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
                             icon = {
@@ -241,7 +240,6 @@ fun ReaderScreen(
                     Text(
                         text = "صفحة $currentPageNumber من ${book?.totalPages ?: "?"}",
                         modifier = Modifier.semantics {
-                            importantForAccessibility = ImportantForAccessibility.Yes
                             contentDescription = "صفحة $currentPageNumber من أصل ${book?.totalPages ?: "غير محدد"}"
                         }
                     )
