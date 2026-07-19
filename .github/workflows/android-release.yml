@@ -37,7 +37,7 @@ jobs:
       - name: 🔨 Execute Build (Turbo Mode)
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --build-cache --configuration-cache --parallel --console=plain -w
+          ./gradlew assembleRelease --build-cache --configuration-cache --parallel --console=plain 
         env:
           KEYSTORE_PATH: ../release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
