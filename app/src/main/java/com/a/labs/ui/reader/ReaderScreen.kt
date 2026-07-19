@@ -123,6 +123,26 @@ fun ReaderScreen(
                             ) { Text("المكتبة") }
                         }
                     }
+                    "PROCESSING_ALERT" -> {
+                        Icon(Icons.Default.Memory, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("الذكاء الاصطناعي في خضم العمل!", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("نقوم حالياً بتهيئة وهندسة النصوص صوتياً في الخلفية لضمان تجربة استماع مثالية. هل تود إيقاف هذه العملية؟", textAlign = TextAlign.Center)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { activeBottomSheet = null }) { 
+                                Text("لا، دعه يستمر بالإبداع") 
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                onClick = {
+                                    activeBottomSheet = null
+                                    viewModel.playAudio()
+                                }
+                            ) { 
+                                Text("إيقاف المعالجة") 
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -186,7 +206,16 @@ fun ReaderScreen(
                         }
 
                         ExtendedFloatingActionButton(
-                            onClick = { viewModel.playAudio() },
+                            onClick = { 
+                                if (audioState == AudioState.PROCESSING) {
+                                    activeBottomSheet = "PROCESSING_ALERT"
+                                } else {
+                                    viewModel.playAudio()
+                                }
+                            },
+                            modifier = Modifier.semantics(mergeDescendants = true) {
+                                role = Role.Button
+                            },
                             containerColor = if (audioState == AudioState.PROCESSING) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
                             icon = {
                                 when (audioState) {
