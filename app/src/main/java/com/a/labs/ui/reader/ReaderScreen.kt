@@ -187,11 +187,6 @@ fun ReaderScreen(
 
                         ExtendedFloatingActionButton(
                             onClick = { viewModel.playAudio() },
-                            modifier = Modifier.clearAndSetSemantics {
-                                role = Role.Button
-                                liveRegion = LiveRegionMode.Polite
-                                contentDescription = btnText
-                            },
                             containerColor = if (audioState == AudioState.PROCESSING) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
                             icon = {
                                 when (audioState) {
@@ -211,7 +206,7 @@ fun ReaderScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("صفحة $currentPageNumber من ${book?.totalPages ?: "?"}", modifier = Modifier.clearAndSetSemantics { contentDescription = "الصفحة $currentPageNumber من أصل ${book?.totalPages}" })
+                    Text("صفحة $currentPageNumber من ${book?.totalPages ?: "?"}")
                 }
             }
         }
@@ -224,7 +219,7 @@ fun ReaderScreen(
                     modifier = Modifier.padding(32.dp)
                 ) {
                     if (isFailed) {
-                        Icon(Icons.Default.ErrorOutline, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.Default.ErrorOutline, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.error)
                         Text("توقفت المعالجة", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                         Text("واجه التطبيق مشكلة أثناء استخراج نصوص هذا الكتاب.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.outline)
                         Button(onClick = { navController.popBackStack() }) {
