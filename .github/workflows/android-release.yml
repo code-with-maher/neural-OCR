@@ -18,18 +18,8 @@ jobs:
           distribution: 'zulu'
           java-version: '25'
 
-      - name: 🗄️ Gradle Cache (Release-specific)
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            ~/.gradle/notifications
-            .gradle/configuration-cache
-            .gradle/build-cache-1
-          key: ${{ runner.os }}-gradle-release-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle.properties', 'gradle/libs.versions.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-release-
+      - name: ⚙️ Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
 
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
