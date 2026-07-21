@@ -65,9 +65,9 @@ fun ReaderScreen(
 
     if (activeBottomSheet != null) {
         ModalBottomSheet(
-            onDismissRequest = { 
+            onDismissRequest = {
                 if (activeBottomSheet == "AUDIO_ERROR") viewModel.audioController.clearError()
-                activeBottomSheet = null 
+                activeBottomSheet = null
             },
             sheetState = sheetState
         ) {
@@ -129,8 +129,8 @@ fun ReaderScreen(
                         Text("الذكاء الاصطناعي في خضم العمل!", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Text("نقوم حالياً بتهيئة وهندسة النصوص صوتياً في الخلفية لضمان تجربة استماع مثالية. هل تود إيقاف هذه العملية؟", textAlign = TextAlign.Center)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { activeBottomSheet = null }) { 
-                                Text("لا، دعه يستمر بالإبداع") 
+                            TextButton(onClick = { activeBottomSheet = null }) {
+                                Text("لا، دعه يستمر بالإبداع")
                             }
                             Spacer(Modifier.width(8.dp))
                             Button(
@@ -139,8 +139,8 @@ fun ReaderScreen(
                                     activeBottomSheet = null
                                     viewModel.playAudio()
                                 }
-                            ) { 
-                                Text("إيقاف المعالجة") 
+                            ) {
+                                Text("إيقاف المعالجة")
                             }
                         }
                     }
@@ -192,12 +192,12 @@ fun ReaderScreen(
         bottomBar = {
             Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp), 
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(), 
-                        horizontalArrangement = Arrangement.SpaceEvenly, 
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = { viewModel.prevPage() }) {
@@ -207,30 +207,39 @@ fun ReaderScreen(
                             Icon(Icons.Default.Replay10, contentDescription = "تراجع 10 ثواني")
                         }
 
-                        // هيكلية زر التشغيل الجديد الاحترافي والنص الديناميكي التابع له
                         val btnText = when (audioState) {
                             AudioState.PROCESSING -> "جاري المعالجة"
                             AudioState.PLAYING -> "إيقاف مؤقت"
                             else -> "تشغيل"
                         }
 
+                        val onPlayButtonClick: () -> Unit = {
+                            if (audioState == AudioState.PROCESSING) {
+                                activeBottomSheet = "PROCESSING_ALERT"
+                            } else {
+                                viewModel.playAudio()
+                            }
+                        }
+
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.semantics(mergeDescendants = true) {
+                                contentDescription = btnText
+                                role = Role.Button
+                                onClick(label = btnText) {
+                                    onPlayButtonClick()
+                                    true
+                                }
+                            }
                         ) {
                             FilledIconButton(
-                                onClick = { 
-                                    if (audioState == AudioState.PROCESSING) {
-                                        activeBottomSheet = "PROCESSING_ALERT"
-                                    } else {
-                                        viewModel.playAudio()
-                                    }
-                                },
-                                modifier = Modifier.size(56.dp),
+                                onClick = onPlayButtonClick,
+                                modifier = Modifier.size(56.dp).clearAndSetSemantics {},
                                 colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = if (audioState == AudioState.PROCESSING) 
-                                        MaterialTheme.colorScheme.secondaryContainer 
-                                    else 
+                                    containerColor = if (audioState == AudioState.PROCESSING)
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    else
                                         MaterialTheme.colorScheme.primaryContainer
                                 )
                             ) {
@@ -238,28 +247,29 @@ fun ReaderScreen(
                                     when (state) {
                                         AudioState.PROCESSING -> {
                                             CircularProgressIndicator(
-                                                modifier = Modifier.size(24.dp), 
+                                                modifier = Modifier.size(24.dp),
                                                 strokeWidth = 2.5.dp,
                                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                                             )
                                         }
                                         AudioState.PLAYING -> {
-                                            Icon(Icons.Default.Pause, contentDescription = "إيقاف مؤقت")
+                                            Icon(Icons.Default.Pause, contentDescription = null)
                                         }
                                         else -> {
-                                            Icon(Icons.Default.PlayArrow, contentDescription = "تشغيل")
+                                            Icon(Icons.Default.PlayArrow, contentDescription = null)
                                         }
                                     }
                                 }
                             }
-                            
+
                             Spacer(Modifier.height(4.dp))
-                            
+
                             Text(
                                 text = btnText,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clearAndSetSemantics {}
                             )
                         }
 
@@ -270,17 +280,18 @@ fun ReaderScreen(
                             Icon(Icons.Default.SkipNext, contentDescription = "الصفحة التالية")
                         }
                     }
-                    
+
                     Spacer(Modifier.height(8.dp))
-                    
-                    // إصلاح التسهيل (Accessibility): نطق التغييرات فوراً وجعل النص تفاعلياً كعنوان
+
                     Text(
                         text = "صفحة $currentPageNumber من ${book?.totalPages ?: "?"}",
-                        modifier = Modifier.semantics {
-                            heading()
-                            liveRegion = LiveRegionMode.Polite
-                            contentDescription = "صفحة $currentPageNumber من أصل ${book?.totalPages ?: "غير محدد"}"
-                        }
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clearAndSetSemantics {
+                                heading()
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = "صفحة $currentPageNumber من أصل ${book?.totalPages ?: "غير محدد"}"
+                            }
                     )
                 }
             }
