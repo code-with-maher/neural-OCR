@@ -21,9 +21,9 @@ dependencies:
 
 settings:
   kotlin:
-    version: "2.3.10"
+    version: "2.3.20"
     ksp:
-      version: "2.3.10"
+      version: "2.3.20"
       processors:
         - androidx.room:room-compiler:2.8.4
       processorOptions:
