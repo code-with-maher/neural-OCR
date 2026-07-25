@@ -3,6 +3,7 @@ product: android/app
 dependencies:
   - $compose.foundation
   - $compose.material3
+  - $compose.materialIconsExtended
   - androidx.activity:activity-compose:1.13.0
   - androidx.core:core-ktx:1.19.0
   - androidx.core:core-splashscreen:1.2.0
@@ -20,7 +21,7 @@ dependencies:
 
 settings:
   kotlin:
-    version: "2.4.10"
+    version: "2.3.10"
     ksp:
       version: "2.3.10"
       processors:
