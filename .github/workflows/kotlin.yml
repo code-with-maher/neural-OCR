@@ -1,0 +1,73 @@
+name: "🚀 Kotlin Toolchain Release APK Build"
+
+on:
+  workflow_dispatch:
+
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: "1"
+
+jobs:
+  build-release:
+    name: "Build & Notify"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛰️ Checkout Code
+        uses: actions/checkout@v7
+
+      - name: 🔧 Make kotlin wrapper executable
+        run: chmod +x ./kotlin
+
+      - name: 🗄️ Cache Kotlin CLI distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/JetBrains/Kotlin/cli
+          key: kotlin-cli-${{ hashFiles('kotlin') }}
+
+      - name: 🔑 Decode Keystore into app/ folder
+        run: echo "${{ secrets.KEY }}" | base64 --decode > app/release.keystore
+
+      - name: 📝 Create keystore.properties next to module.yaml
+        run: |
+          cat > app/keystore.properties << EOF
+          storeFile=${{ github.workspace }}/app/release.keystore
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: 🔨 Build Release APK
+        run: ./kotlin build --project-dir=app --platform=android -v release
+
+      - name: 🔍 Locate & bridge APK to conventional Gradle path
+        id: find_apk
+        run: |
+          REAL_APK=$(find app/build -iname "*.apk" | head -n 1)
+          if [ -z "$REAL_APK" ]; then
+            echo "لم يتم العثور على APK، راجع سجل خطوة البناء أعلاه."
+            exit 1
+          fi
+          echo "Found: $REAL_APK"
+          mkdir -p app/build/outputs/apk/release
+          cp "$REAL_APK" app/build/outputs/apk/release/app-release.apk
+          echo "apk_path=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_OUTPUT"
+
+      - name: 🧹 Cleanup Keystore
+        if: always()
+        run: rm -f app/release.keystore app/keystore.properties
+
+      - name: 📦 Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: ${{ steps.find_apk.outputs.apk_path }}
+
+      - name: ✈️ Notify Telegram
+        if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APK_PATH: ${{ steps.find_apk.outputs.apk_path }}
+        run: |
+          pip install requests --break-system-packages
+          python3 notify_telegram.py
