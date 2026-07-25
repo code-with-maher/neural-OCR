@@ -1,6 +1,9 @@
 name: "🚀 Kotlin Toolchain Release APK Build"
 
 on:
+  push:
+    branches:
+      - feature/kotlin-toolchain-room3
   workflow_dispatch:
 
 env:
