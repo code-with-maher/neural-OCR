@@ -3,7 +3,7 @@ product: android/app
 dependencies:
   - $compose.foundation
   - $compose.material3
-  - $compose.materialIconsExtended
+  - androidx.compose.material:material-icons-extended:1.7.8
   - androidx.activity:activity-compose:1.13.0
   - androidx.core:core-ktx:1.19.0
   - androidx.core:core-splashscreen:1.2.0
@@ -26,6 +26,8 @@ settings:
       version: "2.3.10"
       processors:
         - androidx.room:room-compiler:2.8.4
+      processorOptions:
+        room.schemaLocation: ./schemas
     serialization:
       enabled: true
       version: "1.11.0"
