@@ -1,9 +1,9 @@
 package com.a.labs.data.local.room.dao
 
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
+import androidx.room3.Dao
+import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
+import androidx.room3.Query
 import com.a.labs.data.local.room.entity.BookEntity
 import com.a.labs.data.local.room.entity.ChunkEntity
 import com.a.labs.data.local.room.entity.PageEntity
