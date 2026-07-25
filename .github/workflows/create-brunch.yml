@@ -1,0 +1,30 @@
+name: Create New Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'اسم الفرع الجديد'
+        required: true
+        default: 'feature/kotlin-toolchain-room3'
+
+permissions:
+  contents: write
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and Push New Branch
+        run: |
+          git checkout -b "${{ github.event.inputs.branch_name }}"
+          git commit --allow-empty -m "Chore: Initialize branch for Kotlin Toolchain and Room 3 migration"
+          git push origin "${{ github.event.inputs.branch_name }}"
