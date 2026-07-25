@@ -12,9 +12,9 @@ dependencies:
   - androidx.datastore:datastore-preferences:1.2.1
   - com.squareup.okhttp3:okhttp:5.4.0
   - org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0
-  # Room بناءً على مقتطف التوثيق الرسمي
-  - androidx.room:room-runtime:2.7.0-alpha12
-  - androidx.room:room-ktx:2.7.0-alpha12
+  # توحيد الإصدار إلى 2.7.0 الصريح
+  - androidx.room:room-runtime:2.7.0
+  - androidx.room:room-ktx:2.7.0
   - androidx.work:work-runtime-ktx:2.11.2
   - com.tom-roush:pdfbox-android:2.0.27.0
   - androidx.media3:media3-exoplayer:1.10.1
@@ -25,7 +25,7 @@ settings:
     version: "2.3.20"
     ksp:
       processors:
-        - androidx.room:room-compiler:2.7.0-alpha12
+        - androidx.room:room-compiler:2.7.0
       processorOptions:
         room.schemaLocation: ./schemas
         room.generateKotlin: "true"
