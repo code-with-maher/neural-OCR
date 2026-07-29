@@ -28,7 +28,7 @@ jobs:
         run: chmod +x ./kotlin
 
       - name: Commit and Push updated Kotlin CLI wrapper
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore: auto-update Kotlin CLI wrapper to latest dev release"
           file_pattern: "kotlin"
