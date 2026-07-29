@@ -28,7 +28,6 @@ settings:
         - $libs.androidx.room.compiler
       processorOptions:
         room.schemaLocation: ./schemas
-        room.generateKotlin: "true"
     serialization:
       format: json
       version: "1.11.0"
