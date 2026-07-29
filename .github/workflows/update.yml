@@ -1,0 +1,35 @@
+name: Daily Kotlin CLI Dev Version Updater
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: "1"
+
+jobs:
+  update-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Make kotlin wrapper executable
+        run: chmod +x ./kotlin
+
+      - name: Update Kotlin CLI to latest Dev version
+        run: ./kotlin update --dev
+
+      - name: Ensure executable permission on updated kotlin wrapper
+        run: chmod +x ./kotlin
+
+      - name: Commit and Push updated Kotlin CLI wrapper
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: auto-update Kotlin CLI wrapper to latest dev release"
+          file_pattern: "kotlin"
+          commit_options: '--no-verify'
