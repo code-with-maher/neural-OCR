@@ -1,42 +1,50 @@
 product: android/app
 
 dependencies:
-  - $compose.foundation
-  - $compose.material3
-  - androidx.compose.material:material-icons-extended:1.7.8
-  - androidx.activity:activity-compose:1.13.0
-  - androidx.core:core-ktx:1.19.0
-  - androidx.core:core-splashscreen:1.2.0
-  - androidx.lifecycle:lifecycle-runtime-ktx:2.11.0
-  - androidx.navigation:navigation-compose:2.9.8
-  - androidx.datastore:datastore-preferences:1.2.1
-  - com.squareup.okhttp3:okhttp:5.4.0
-  - org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0
-  # توحيد الإصدار إلى 2.7.0 الصريح
-  - androidx.room:room-runtime:2.7.0
-  - androidx.room:room-ktx:2.7.0
-  - androidx.work:work-runtime-ktx:2.11.2
-  - com.tom-roush:pdfbox-android:2.0.27.0
-  - androidx.media3:media3-exoplayer:1.10.1
-  - androidx.media3:media3-session:1.10.1
+  # Compose
+  - $libs.androidx.compose.foundation
+  - $libs.androidx.compose.material3
+  - $libs.androidx.compose.material.icons.extended
+  - $libs.androidx.activity.compose
+
+  # Core & Lifecycle
+  - $libs.androidx.core.ktx
+  - $libs.androidx.core.splashscreen
+  - $libs.androidx.lifecycle.runtime.ktx
+  - $libs.androidx.navigation.compose
+  - $libs.androidx.datastore.preferences
+
+  # Networking
+  - $libs.okhttp
+
+  # Room
+  - $libs.androidx.room.runtime
+  - $libs.androidx.room.ktx
+
+  # Background & Media & PDF
+  - $libs.androidx.work.runtime.ktx
+  - $libs.pdfbox.android
+  - $libs.androidx.media3.exoplayer
+  - $libs.androidx.media3.session
 
 settings:
   kotlin:
-    version: "2.3.20"
+    version: "2.4.10"
     ksp:
+      version: "2.3.10"
       processors:
-        - androidx.room:room-compiler:2.7.0
+        - $libs.androidx.room.compiler
       processorOptions:
         room.schemaLocation: ./schemas
         room.generateKotlin: "true"
     serialization:
-      enabled: true
+      format: json
       version: "1.11.0"
   compose:
     enabled: true
   android:
-    compileSdk: 36
-    targetSdk: 36
+    compileSdk: 37
+    targetSdk: 37
     minSdk: 28
     parcelize:
       enabled: true
