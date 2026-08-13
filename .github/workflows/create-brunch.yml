@@ -1,12 +1,16 @@
-name: Run Kotlin CLI Help
+name: Run All Kotlin CLI Help Commands
 
 on:
   workflow_dispatch:
   push:
     branches: [ "main", "master" ]
 
+env:
+  # إلغاء رسالة الترحيب والرموز المزعجة عند التشغيل الأول
+  KOTLIN_CLI_NO_WELCOME_BANNER: "true"
+
 jobs:
-  general-help:
+  run-all-help:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,15 +27,31 @@ jobs:
         run: |
           if [ -f "./kotlin" ]; then chmod +x ./kotlin; fi
 
-      - name: Run General Help Command
+      - name: Run Main Help & All Subcommands Help
         run: |
-          echo "=========================================="
-          echo "       RUNNING KOTLIN HELP COMMAND        "
-          echo "=========================================="
-          
-          if [ -f "./kotlin" ]; then
-            ./kotlin --help
-          else
-            echo "Executable ./kotlin not found! Current directory layout:"
+          if [ ! -f "./kotlin" ]; then
+            echo "Executable ./kotlin not found!"
             ls -la
+            exit 1
           fi
+
+          echo "=========================================="
+          echo "         1. GENERAL HELP COMMAND          "
+          echo "=========================================="
+          ./kotlin --help
+
+          echo ""
+          echo "=========================================="
+          echo "       2. SUBCOMMANDS HELP INSPECTION     "
+          echo "=========================================="
+
+          # قائمة الأوامر الفرعية المتوقعة لاستخراج المساعدة التفصيلية لكل منها
+          COMMANDS=("build" "run" "test" "clean" "show" "init" "tasks" "publish" "export" "toolchain" "version")
+
+          for cmd in "${COMMANDS[@]}"; do
+            echo ""
+            echo "------------------------------------------"
+            echo " >>> HELP FOR: ./kotlin $cmd --help"
+            echo "------------------------------------------"
+            ./kotlin "$cmd" --help || echo "Note: Command '$cmd' might not be implemented yet or returned an exit code."
+          done
