@@ -6,7 +6,6 @@ on:
     branches: [ "main", "master" ]
 
 env:
-  # إلغاء رسالة الترحيب والرموز المزعجة عند التشغيل الأول
   KOTLIN_CLI_NO_WELCOME_BANNER: "true"
 
 jobs:
@@ -45,13 +44,35 @@ jobs:
           echo "       2. SUBCOMMANDS HELP INSPECTION     "
           echo "=========================================="
 
-          # قائمة الأوامر الفرعية المتوقعة لاستخراج المساعدة التفصيلية لكل منها
-          COMMANDS=("build" "run" "test" "clean" "show" "init" "tasks" "publish" "export" "toolchain" "version")
+          # القائمة الكاملة والدقيقة للأوامر والأوامر الفرعية
+          COMMANDS=(
+            "build"
+            "check"
+            "clean"
+            "clean-shared-caches"
+            "compose-hot-reload-mcp-server"
+            "do"
+            "generate-completion"
+            "init"
+            "package"
+            "publish"
+            "run"
+            "show"
+            "show modules"
+            "show settings"
+            "show dependencies"
+            "show tasks"
+            "show checks"
+            "show commands"
+            "test"
+            "tool"
+            "update"
+          )
 
           for cmd in "${COMMANDS[@]}"; do
             echo ""
             echo "------------------------------------------"
             echo " >>> HELP FOR: ./kotlin $cmd --help"
             echo "------------------------------------------"
-            ./kotlin "$cmd" --help || echo "Note: Command '$cmd' might not be implemented yet or returned an exit code."
+            eval "./kotlin $cmd --help" || echo "Note: Command '$cmd' returned an exit code or error."
           done
