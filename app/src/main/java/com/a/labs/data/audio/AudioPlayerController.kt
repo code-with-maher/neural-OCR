@@ -9,6 +9,7 @@ import com.a.labs.data.local.SettingsManager
 import com.a.labs.data.local.room.entity.PageEntity
 import com.a.labs.data.remote.api.GeminiTtsClient
 import com.a.labs.data.repository.BookRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,6 +20,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 enum class AudioState {
     IDLE,
@@ -44,12 +48,17 @@ class AudioPlayerController(
     private val scope =
         CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private var generationJob: Job? = null
+    private var playbackJob: Job? = null
 
     private var currentBookId: String? = null
-    private var currentPageNumber: Int = -1
+    private var currentPageNumber = -1
+    private var currentEngineId = TtsEngineId.SYSTEM
 
     private var userIntendedToPlay = false
+
+    private val audioManager =
+        appContext.getSystemService(Context.AUDIO_SERVICE)
+            as AudioManager
 
     private val _audioState =
         MutableStateFlow(AudioState.IDLE)
@@ -69,15 +78,26 @@ class AudioPlayerController(
     val errorMessage: StateFlow<String?> =
         _errorMessage.asStateFlow()
 
-    private val audioManager =
-        appContext.getSystemService(Context.AUDIO_SERVICE)
-            as AudioManager
+    private val httpClient =
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.MINUTES)
+            .readTimeout(15, TimeUnit.MINUTES)
+            .writeTimeout(15, TimeUnit.MINUTES)
+            .callTimeout(15, TimeUnit.MINUTES)
+            .build()
+
+    private val geminiClient =
+        GeminiTtsClient(
+            context = appContext,
+            client = httpClient,
+            apiKey = ""
+        )
 
     private val systemTts =
         SystemTtsWrapper(appContext).apply {
 
             onPlaybackStateChanged = { playing ->
-                if (currentEngine() == TtsEngineId.SYSTEM) {
+                if (currentEngineId == TtsEngineId.SYSTEM) {
                     _audioState.value =
                         if (playing) {
                             AudioState.PLAYING
@@ -92,10 +112,12 @@ class AudioPlayerController(
             }
         }
 
-    private var geminiAudioPlayer: GeminiAudioPlayer? = null
-
     private val systemFocusListener =
         AudioManager.OnAudioFocusChangeListener { focusChange ->
+
+            if (currentEngineId != TtsEngineId.SYSTEM) {
+                return@OnAudioFocusChangeListener
+            }
 
             when (focusChange) {
 
@@ -103,19 +125,13 @@ class AudioPlayerController(
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
 
-                    if (currentEngine() == TtsEngineId.SYSTEM &&
-                        _audioState.value == AudioState.PLAYING
-                    ) {
+                    if (_audioState.value == AudioState.PLAYING) {
                         systemTts.stop(manual = false)
                     }
                 }
 
                 AudioManager.AUDIOFOCUS_GAIN -> {
-
-                    if (
-                        currentEngine() == TtsEngineId.SYSTEM &&
-                        userIntendedToPlay
-                    ) {
+                    if (userIntendedToPlay) {
                         systemTts.resume()
                     }
                 }
@@ -127,10 +143,9 @@ class AudioPlayerController(
     }
 
     /**
-     * Kept for compatibility with ReaderViewModel.
+     * Kept for ReaderViewModel compatibility.
      *
-     * Gemini no longer uses Media3, so there is no controller
-     * connection to establish here.
+     * Audio playback no longer uses Media3 directly from here.
      */
     fun connect() = Unit
 
@@ -138,10 +153,14 @@ class AudioPlayerController(
         bookId: String,
         pageNumber: Int
     ) {
-        generationJob?.cancel()
+        playbackJob?.cancel()
 
-        generationJob = scope.launch {
-            val engine = settingsManager.ttsEngine.first()
+        playbackJob = scope.launch {
+
+            val engine =
+                settingsManager.ttsEngine.first()
+
+            currentEngineId = engine
 
             val samePage =
                 currentBookId == bookId &&
@@ -150,9 +169,11 @@ class AudioPlayerController(
             if (samePage &&
                 _audioState.value != AudioState.ERROR
             ) {
-                togglePlayback(engine)
+                togglePlayback()
                 return@launch
             }
+
+            stopCurrentPlayback()
 
             currentBookId = bookId
             currentPageNumber = pageNumber
@@ -181,15 +202,13 @@ class AudioPlayerController(
                         pageNumber = pageNumber
                     )
 
-                TtsEngineId.ELEVENLABS -> {
+                TtsEngineId.ELEVENLABS ->
                     setError(
                         "محرك ElevenLabs غير متاح مؤقتًا."
                     )
-                }
 
-                else -> {
+                else ->
                     setError("محرك الصوت غير معروف.")
-                }
             }
         }
     }
@@ -199,12 +218,14 @@ class AudioPlayerController(
     ) {
         stopGemini()
 
-        systemTts.stop(manual = true)
         requestSystemAudioFocus()
 
-        _audioState.value = AudioState.PLAYING
+        _audioState.value =
+            AudioState.PLAYING
 
-        systemTts.speak(page.markdownContent)
+        systemTts.speak(
+            page.markdownContent
+        )
     }
 
     private suspend fun startGeminiTts(
@@ -215,27 +236,6 @@ class AudioPlayerController(
         systemTts.stop(manual = true)
         abandonSystemAudioFocus()
 
-        /*
-         * If the page already has a generated file, use it
-         * directly. Streaming is only required when generation
-         * has not happened yet.
-         */
-        page.audioUri
-            ?.let { FilePath ->
-                val existingFile =
-                    java.io.File(FilePath)
-
-                if (existingFile.exists()) {
-                    /*
-                     * The current GeminiAudioPlayer is a streaming
-                     * AudioTrack player. Existing files can be
-                     * handled by a future persistent playback layer.
-                     *
-                     * For now we regenerate only when needed.
-                     */
-                }
-            }
-
         val apiKey =
             settingsManager.geminiKey.first()
 
@@ -244,99 +244,75 @@ class AudioPlayerController(
             return
         }
 
-        stopGemini()
-
-        val player =
-            GeminiAudioPlayer(appContext)
-
-        geminiAudioPlayer = player
-
-        val outputFile =
-            java.io.File(
-                appContext.cacheDir,
-                "audio_${bookId}_${pageNumber}.wav"
+        /*
+         * GeminiTtsClient owns GeminiAudioPlayer.
+         * This controller only coordinates the operation.
+         */
+        val client =
+            GeminiTtsClient(
+                context = appContext,
+                client = httpClient,
+                apiKey = apiKey
             )
 
         try {
-            _audioState.value = AudioState.PROCESSING
-
-            player.start(
-                outputFile = outputFile,
-                sampleRate =
-                    GeminiAudioPlayer.DEFAULT_SAMPLE_RATE,
-                channels =
-                    GeminiAudioPlayer.DEFAULT_CHANNELS,
-                bitsPerSample =
-                    GeminiAudioPlayer.DEFAULT_BITS_PER_SAMPLE
-            )
-
-            _audioState.value = AudioState.PLAYING
+            _audioState.value =
+                AudioState.PROCESSING
 
             val result =
-                GeminiTtsClient(
-                    context = appContext,
-                    client = okhttp3.OkHttpClient(),
-                    apiKey = apiKey
-                ).generateSpeech(
+                client.generateSpeech(
                     text = page.markdownContent,
                     fileName =
-                        "audio_${bookId}_${pageNumber}",
-                    onAudioChunk = { pcmChunk ->
-                        player.writeChunk(pcmChunk)
-                    }
+                        "audio_${bookId}_${pageNumber}"
                 )
 
             if (result.isFailure) {
-                player.stop()
-
                 setError(
                     result.exceptionOrNull()?.message
                         ?: "فشل توليد الصوت."
                 )
-
                 return
             }
 
-            /*
-             * Finish closes the WAV stream, fixes its header,
-             * and releases AudioTrack after playback completes.
-             */
-            val finalFile =
-                player.finish()
+            val file =
+                result.getOrNull()
+
+            if (file == null || !file.exists()) {
+                setError(
+                    "لم يتم إنشاء ملف الصوت."
+                )
+                return
+            }
 
             repository.insertPages(
                 listOf(
                     page.copy(
                         audioUri =
-                            finalFile.absolutePath
+                            file.absolutePath
                     )
                 )
             )
 
-            _audioState.value = AudioState.PAUSED
+            _audioState.value =
+                AudioState.PAUSED
 
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            player.stop()
+        } catch (e: CancellationException) {
+            client.stop()
             throw e
 
         } catch (e: Exception) {
-            player.stop()
+            client.stop()
 
             setError(
-                e.message ?: "حدث خطأ أثناء تشغيل الصوت."
+                e.message
+                    ?: "حدث خطأ أثناء توليد الصوت."
             )
-
-        } finally {
-            if (geminiAudioPlayer === player) {
-                geminiAudioPlayer = null
-            }
         }
     }
 
-    private suspend fun togglePlayback(
-        engine: String
-    ) {
-        when (engine) {
+    private suspend fun togglePlayback() {
+
+        when (currentEngineId) {
 
             TtsEngineId.SYSTEM -> {
 
@@ -344,22 +320,47 @@ class AudioPlayerController(
                     AudioState.PLAYING
                 ) {
                     userIntendedToPlay = false
-                    systemTts.stop(manual = true)
-                    _audioState.value = AudioState.PAUSED
+
+                    systemTts.stop(
+                        manual = true
+                    )
+
+                    _audioState.value =
+                        AudioState.PAUSED
+
                 } else {
                     userIntendedToPlay = true
+
                     requestSystemAudioFocus()
+
                     systemTts.resume()
-                    _audioState.value = AudioState.PLAYING
+
+                    _audioState.value =
+                        AudioState.PLAYING
                 }
             }
 
             TtsEngineId.GEMINI_TTS -> {
 
-                val player =
-                    geminiAudioPlayer
+                /*
+                 * Gemini streaming playback is owned by
+                 * GeminiTtsClient/GeminiAudioPlayer.
+                 *
+                 * A completed stream currently cannot be
+                 * resumed from this coordinator.
+                 *
+                 * Replaying the page starts a new generation.
+                 */
+                if (_audioState.value ==
+                    AudioState.PLAYING
+                ) {
+                    userIntendedToPlay = false
 
-                if (player == null) {
+                    playbackJob?.cancel()
+
+                    _audioState.value =
+                        AudioState.PAUSED
+                } else {
                     currentBookId?.let { bookId ->
                         if (currentPageNumber >= 0) {
                             playPage(
@@ -368,88 +369,102 @@ class AudioPlayerController(
                             )
                         }
                     }
-                    return
-                }
-
-                if (_audioState.value ==
-                    AudioState.PLAYING
-                ) {
-                    userIntendedToPlay = false
-                    player.pause()
-                    _audioState.value = AudioState.PAUSED
-                } else {
-                    userIntendedToPlay = true
-                    player.resume()
-                    _audioState.value = AudioState.PLAYING
                 }
             }
 
-            else -> {
+            else ->
                 setError(
                     "محرك الصوت غير متاح حاليًا."
                 )
-            }
         }
+    }
+
+    private fun stopCurrentPlayback() {
+        userIntendedToPlay = false
+
+        systemTts.stop(
+            manual = true
+        )
+
+        stopGemini()
+
+        abandonSystemAudioFocus()
+
+        _audioState.value =
+            AudioState.IDLE
+
+        _highlightedParagraphIndex.value = -1
     }
 
     private fun stopGemini() {
-        generationJob?.let { job ->
-            if (job != kotlinx.coroutines.currentCoroutineContext()
-                    .let { null }
-            ) {
-                // Generation cancellation is handled by the
-                // coroutine that owns GeminiTtsClient.
-            }
-        }
-
-        geminiAudioPlayer?.stop()
-        geminiAudioPlayer = null
+        /*
+         * The current Gemini generation is cancelled
+         * by cancelling playbackJob.
+         *
+         * GeminiTtsClient itself owns the active call
+         * and its GeminiAudioPlayer.
+         */
     }
 
     fun pause() {
+
         userIntendedToPlay = false
 
-        when (currentEngine()) {
+        when (currentEngineId) {
 
-            TtsEngineId.SYSTEM ->
-                systemTts.stop(manual = true)
+            TtsEngineId.SYSTEM -> {
+                systemTts.stop(
+                    manual = true
+                )
+            }
 
-            TtsEngineId.GEMINI_TTS ->
-                geminiAudioPlayer?.pause()
+            TtsEngineId.GEMINI_TTS -> {
+                /*
+                 * Streaming Gemini playback is currently
+                 * controlled by GeminiAudioPlayer internally.
+                 * Full pause/resume across generation belongs
+                 * to the dedicated playback layer.
+                 */
+            }
         }
 
-        _audioState.value = AudioState.PAUSED
+        _audioState.value =
+            AudioState.PAUSED
     }
 
     fun resume() {
+
         userIntendedToPlay = true
 
-        when (currentEngine()) {
+        when (currentEngineId) {
 
             TtsEngineId.SYSTEM -> {
                 requestSystemAudioFocus()
                 systemTts.resume()
             }
 
-            TtsEngineId.GEMINI_TTS ->
-                geminiAudioPlayer?.resume()
+            TtsEngineId.GEMINI_TTS -> {
+                currentBookId?.let { bookId ->
+                    if (currentPageNumber >= 0) {
+                        playPage(
+                            bookId,
+                            currentPageNumber
+                        )
+                    }
+                }
+            }
         }
 
-        _audioState.value = AudioState.PLAYING
+        _audioState.value =
+            AudioState.PLAYING
     }
 
     fun seekForward() {
-        /*
-         * Seeking streamed Gemini PCM is intentionally not handled
-         * here. AudioPlayerController remains a coordinator.
-         */
+        // Not supported by the streaming Gemini layer yet.
     }
 
     fun seekBackward() {
-        /*
-         * Seeking will be added to the persistent audio playback
-         * layer later.
-         */
+        // Not supported by the streaming Gemini layer yet.
     }
 
     fun clearError() {
@@ -459,16 +474,18 @@ class AudioPlayerController(
     fun disconnect() {
         userIntendedToPlay = false
 
-        generationJob?.cancel()
-        generationJob = null
+        playbackJob?.cancel()
+        playbackJob = null
 
-        geminiAudioPlayer?.stop()
-        geminiAudioPlayer = null
+        systemTts.stop(
+            manual = true
+        )
 
-        systemTts.stop(manual = true)
         abandonSystemAudioFocus()
 
-        _audioState.value = AudioState.IDLE
+        _audioState.value =
+            AudioState.IDLE
+
         _highlightedParagraphIndex.value = -1
     }
 
@@ -478,16 +495,18 @@ class AudioPlayerController(
         scope.cancel()
     }
 
-    private suspend fun currentEngine(): String =
-        settingsManager.ttsEngine.first()
-
-    private fun setError(message: String) {
-        _audioState.value = AudioState.ERROR
-        _errorMessage.value = message
+    private fun setError(
+        message: String
+    ) {
         userIntendedToPlay = false
+        _audioState.value =
+            AudioState.ERROR
+        _errorMessage.value =
+            message
     }
 
     private fun requestSystemAudioFocus() {
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
             val attributes =
@@ -507,13 +526,17 @@ class AudioPlayerController(
                     AudioManager
                         .AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 )
-                    .setAudioAttributes(attributes)
+                    .setAudioAttributes(
+                        attributes
+                    )
                     .setOnAudioFocusChangeListener(
                         systemFocusListener
                     )
                     .build()
 
-            audioManager.requestAudioFocus(request)
+            audioManager.requestAudioFocus(
+                request
+            )
 
         } else {
 
@@ -521,12 +544,14 @@ class AudioPlayerController(
             audioManager.requestAudioFocus(
                 systemFocusListener,
                 AudioManager.STREAM_ACCESSIBILITY,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                AudioManager
+                    .AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             )
         }
     }
 
     private fun abandonSystemAudioFocus() {
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
             val attributes =
@@ -546,13 +571,17 @@ class AudioPlayerController(
                     AudioManager
                         .AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 )
-                    .setAudioAttributes(attributes)
+                    .setAudioAttributes(
+                        attributes
+                    )
                     .setOnAudioFocusChangeListener(
                         systemFocusListener
                     )
                     .build()
 
-            audioManager.abandonAudioFocusRequest(request)
+            audioManager.abandonAudioFocusRequest(
+                request
+            )
 
         } else {
 
@@ -562,4 +591,4 @@ class AudioPlayerController(
             )
         }
     }
-}
+} 
