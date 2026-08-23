@@ -12,21 +12,28 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Handles PCM audio produced by Gemini TTS streaming.
  *
  * Responsibilities:
- * - Play PCM chunks immediately through AudioTrack.
- * - Collect the same PCM chunks while they are being played.
- * - Save the complete stream as a WAV file when generation finishes.
- * - Handle stop/release safely.
+ * - Plays incoming PCM chunks immediately through AudioTrack.
+ * - Writes the same PCM stream directly to a WAV file.
+ * - Does not keep the complete audio in RAM.
+ * - Finalizes the WAV header when generation finishes.
+ * - Supports pause, resume and stop.
  *
- * This class intentionally knows nothing about the Gemini API itself.
- * GeminiTtsClient is responsible for networking and supplying PCM chunks.
+ * This class does not know anything about:
+ * - Gemini API
+ * - HTTP
+ * - SSE
+ * - Base64
+ * - API keys
+ *
+ * GeminiTtsClient is responsible for receiving and decoding the
+ * Gemini stream and passing PCM chunks to this class.
  */
 class GeminiAudioPlayer(
     context: Context
@@ -38,6 +45,7 @@ class GeminiAudioPlayer(
         const val DEFAULT_BITS_PER_SAMPLE = 16
 
         private const val WAV_HEADER_SIZE = 44
+        private const val PCM_FORMAT_CODE = 1
     }
 
     private val appContext = context.applicationContext
@@ -48,20 +56,18 @@ class GeminiAudioPlayer(
     private var audioTrack: AudioTrack? = null
     private var audioFocusRequest: AudioFocusRequest? = null
 
-    private val stopped = AtomicBoolean(false)
+    private val stopped = AtomicBoolean(true)
 
     private var sampleRate = DEFAULT_SAMPLE_RATE
     private var channels = DEFAULT_CHANNELS
     private var bitsPerSample = DEFAULT_BITS_PER_SAMPLE
 
-    /**
-     * Starts a new Gemini audio stream.
-     *
-     * PCM chunks should be passed to [writeChunk] as soon as they arrive.
-     *
-     * After all chunks have been received, call [finish] to create the WAV file.
-     */
+    private var outputFile: File? = null
+    private var outputStream: BufferedOutputStream? = null
+    private var totalPcmBytes: Long = 0L
+
     fun start(
+        outputFile: File,
         sampleRate: Int = DEFAULT_SAMPLE_RATE,
         channels: Int = DEFAULT_CHANNELS,
         bitsPerSample: Int = DEFAULT_BITS_PER_SAMPLE
@@ -77,33 +83,168 @@ class GeminiAudioPlayer(
         }
 
         require(bitsPerSample == 16) {
-            "Gemini PCM playback currently expects 16-bit PCM"
+            "Only 16-bit PCM is supported"
         }
 
         this.sampleRate = sampleRate
         this.channels = channels
         this.bitsPerSample = bitsPerSample
+        this.outputFile = outputFile
+        this.totalPcmBytes = 0L
+
+        outputFile.parentFile?.mkdirs()
+
+        val stream = BufferedOutputStream(
+            FileOutputStream(outputFile)
+        )
+
+        outputStream = stream
+
+        writeWavHeader(
+            output = stream,
+            pcmDataSize = 0L
+        )
+
+        stream.flush()
 
         stopped.set(false)
 
         requestAudioFocus()
+        createAudioTrack()
+    }
 
-        val channelConfig =
+    /**
+     * Writes one PCM chunk to disk and immediately plays it.
+     *
+     * This method should be called as soon as each Gemini audio
+     * chunk arrives.
+     */
+    @Synchronized
+    fun writeChunk(pcmData: ByteArray) {
+        if (pcmData.isEmpty() || stopped.get()) return
+
+        val stream = outputStream
+            ?: throw IllegalStateException(
+                "GeminiAudioPlayer has not been started"
+            )
+
+        stream.write(pcmData)
+        totalPcmBytes += pcmData.size.toLong()
+
+        writeToAudioTrack(pcmData)
+    }
+
+    /**
+     * Completes the WAV file and releases playback resources.
+     */
+    suspend fun finish(): File = withContext(Dispatchers.IO) {
+
+        if (stopped.get()) {
+            throw IllegalStateException(
+                "Gemini audio playback is not active"
+            )
+        }
+
+        val file = outputFile
+            ?: throw IllegalStateException(
+                "No output file configured"
+            )
+
+        val stream = outputStream
+            ?: throw IllegalStateException(
+                "Output stream is not open"
+            )
+
+        stream.flush()
+        stream.close()
+        outputStream = null
+
+        updateWavHeader(
+            file = file,
+            pcmDataSize = totalPcmBytes
+        )
+
+        waitForPlaybackToFinish()
+
+        releaseAudioTrack()
+        abandonAudioFocus()
+
+        stopped.set(true)
+
+        file
+    }
+
+    /**
+     * Stops playback immediately and closes the current file stream.
+     *
+     * The partially generated WAV file is not deleted.
+     */
+    @Synchronized
+    fun stop() {
+        stopped.set(true)
+
+        try {
+            outputStream?.flush()
+        } catch (_: Exception) {
+        }
+
+        try {
+            outputStream?.close()
+        } catch (_: Exception) {
+        }
+
+        outputStream = null
+
+        releaseAudioTrack()
+        abandonAudioFocus()
+
+        outputFile = null
+        totalPcmBytes = 0L
+    }
+
+    fun pause() {
+        audioTrack?.let { track ->
+            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                try {
+                    track.pause()
+                } catch (_: IllegalStateException) {
+                }
+            }
+        }
+    }
+
+    fun resume() {
+        if (stopped.get()) return
+
+        audioTrack?.let { track ->
+            if (track.playState == AudioTrack.PLAYSTATE_PAUSED) {
+                try {
+                    track.play()
+                } catch (_: IllegalStateException) {
+                }
+            }
+        }
+    }
+
+    fun isActive(): Boolean {
+        return !stopped.get() && audioTrack != null
+    }
+
+    fun pcmBytesWritten(): Long {
+        return totalPcmBytes
+    }
+
+    private fun createAudioTrack() {
+        val channelMask =
             if (channels == 1) {
                 AudioFormat.CHANNEL_OUT_MONO
             } else {
                 AudioFormat.CHANNEL_OUT_STEREO
             }
 
-        val audioFormat = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(sampleRate)
-            .setChannelMask(channelConfig)
-            .build()
-
         val minBufferSize = AudioTrack.getMinBufferSize(
             sampleRate,
-            channelConfig,
+            channelMask,
             AudioFormat.ENCODING_PCM_16BIT
         )
 
@@ -111,22 +252,29 @@ class GeminiAudioPlayer(
             "Unable to determine AudioTrack buffer size"
         }
 
-        /*
-         * A slightly larger buffer helps avoid underruns when network
-         * chunks arrive unevenly.
-         *
-         * We intentionally do not make this enormous because that would
-         * increase playback latency.
-         */
-        val bufferSize = (minBufferSize * 2).coerceAtLeast(
+        val minimumStreamingBuffer =
             sampleRate * channels * 2 / 4
+
+        val bufferSize = maxOf(
+            minBufferSize * 2,
+            minimumStreamingBuffer
         )
+
+        val audioFormat = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(sampleRate)
+            .setChannelMask(channelMask)
+            .build()
 
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .setUsage(
+                        AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
+                    )
+                    .setContentType(
+                        AudioAttributes.CONTENT_TYPE_SPEECH
+                    )
                     .build()
             )
             .setAudioFormat(audioFormat)
@@ -135,19 +283,10 @@ class GeminiAudioPlayer(
             .build()
 
         audioTrack = track
-
         track.play()
     }
 
-    /**
-     * Immediately writes one PCM chunk to the speaker.
-     *
-     * This method should be called from the Gemini streaming callback.
-     */
-    fun writeChunk(pcmData: ByteArray) {
-        if (pcmData.isEmpty()) return
-        if (stopped.get()) return
-
+    private fun writeToAudioTrack(pcmData: ByteArray) {
         val track = audioTrack ?: return
 
         var offset = 0
@@ -175,115 +314,50 @@ class GeminiAudioPlayer(
         }
     }
 
-    /**
-     * Finishes playback and writes the accumulated PCM data to a WAV file.
-     *
-     * [pcmData] should contain all PCM chunks received from Gemini.
-     */
-    suspend fun finish(
-        pcmData: ByteArray,
-        outputFile: File
-    ): File = withContext(Dispatchers.IO) {
-
-        if (stopped.get()) {
-            throw IllegalStateException(
-                "Gemini audio playback was stopped"
-            )
-        }
-
-        /*
-         * Wait until AudioTrack has consumed the written PCM.
-         *
-         * This prevents releasing the track while the last samples are
-         * still being played.
-         */
-        waitForPlaybackToFinish()
-
-        writeWavFile(
-            pcmData = pcmData,
-            outputFile = outputFile,
-            sampleRate = sampleRate,
-            channels = channels,
-            bitsPerSample = bitsPerSample
-        )
-
-        releaseAudioTrack()
-
-        outputFile
-    }
-
-    /**
-     * Stops playback immediately.
-     *
-     * This does not delete an already existing file.
-     */
-    fun stop() {
-        stopped.set(true)
-
-        releaseAudioTrack()
-        abandonAudioFocus()
-    }
-
-    /**
-     * Pauses the current AudioTrack without destroying it.
-     */
-    fun pause() {
-        audioTrack?.let { track ->
-            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                track.pause()
-            }
-        }
-    }
-
-    /**
-     * Resumes a paused AudioTrack.
-     */
-    fun resume() {
-        if (stopped.get()) return
-
-        audioTrack?.let { track ->
-            if (track.playState == AudioTrack.PLAYSTATE_PAUSED) {
-                track.play()
-            }
-        }
-    }
-
-    /**
-     * Returns whether the player currently has an active stream.
-     */
-    fun isActive(): Boolean {
-        return !stopped.get() && audioTrack != null
-    }
-
     private fun waitForPlaybackToFinish() {
         val track = audioTrack ?: return
 
-        /*
-         * PLAYSTATE_PLAYING can remain active while the last written
-         * buffer is being consumed.
-         *
-         * AudioTrack does not expose a simple "all data written by this
-         * stream has finished" callback, so pause/release is deliberately
-         * handled after the stream has been consumed.
-         */
         try {
-            track.setNotificationMarkerPosition(
-                track.playbackHeadPosition
-            )
+            val bytesPerFrame =
+                channels * bitsPerSample / 8
+
+            val writtenFrames =
+                totalPcmBytes / bytesPerFrame
+
+            val startPosition =
+                track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+
+            val targetPosition =
+                startPosition + writtenFrames
+
+            val timeoutMs = 5_000L
+            val startTime = System.currentTimeMillis()
+
+            while (!stopped.get()) {
+                val currentPosition =
+                    track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+
+                if (currentPosition >= targetPosition) {
+                    break
+                }
+
+                if (
+                    System.currentTimeMillis() - startTime >=
+                    timeoutMs
+                ) {
+                    break
+                }
+
+                Thread.sleep(10L)
+            }
         } catch (_: Exception) {
-            // Some devices may reject marker operations.
         }
     }
 
-    private fun writeWavFile(
-        pcmData: ByteArray,
-        outputFile: File,
-        sampleRate: Int,
-        channels: Int,
-        bitsPerSample: Int
+    private fun writeWavHeader(
+        output: BufferedOutputStream,
+        pcmDataSize: Long
     ) {
-        outputFile.parentFile?.mkdirs()
-
         val byteRate =
             sampleRate * channels * bitsPerSample / 8
 
@@ -291,56 +365,89 @@ class GeminiAudioPlayer(
             channels * bitsPerSample / 8
 
         val riffChunkSize =
-            36 + pcmData.size
+            36L + pcmDataSize
 
-        val header = ByteBuffer
+        val header = java.nio.ByteBuffer
             .allocate(WAV_HEADER_SIZE)
-            .order(ByteOrder.LITTLE_ENDIAN)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
             .apply {
-
                 put("RIFF".toByteArray(Charsets.US_ASCII))
-                putInt(riffChunkSize)
+                putInt(riffChunkSize.toInt())
 
                 put("WAVE".toByteArray(Charsets.US_ASCII))
 
                 put("fmt ".toByteArray(Charsets.US_ASCII))
                 putInt(16)
 
-                // PCM format
-                putShort(1.toShort())
-
+                putShort(PCM_FORMAT_CODE.toShort())
                 putShort(channels.toShort())
-
                 putInt(sampleRate)
-
                 putInt(byteRate)
-
                 putShort(blockAlign.toShort())
-
                 putShort(bitsPerSample.toShort())
 
                 put("data".toByteArray(Charsets.US_ASCII))
-                putInt(pcmData.size)
+                putInt(pcmDataSize.toInt())
             }
             .array()
 
-        BufferedOutputStream(
-            FileOutputStream(outputFile)
-        ).use { output ->
+        output.write(header)
+    }
 
-            output.write(header)
-            output.write(pcmData)
-            output.flush()
+    private fun updateWavHeader(
+        file: File,
+        pcmDataSize: Long
+    ) {
+        RandomAccessFile(file, "rw").use { randomAccessFile ->
+
+            val byteRate =
+                sampleRate * channels * bitsPerSample / 8
+
+            val blockAlign =
+                channels * bitsPerSample / 8
+
+            val riffChunkSize =
+                36L + pcmDataSize
+
+            val header = java.nio.ByteBuffer
+                .allocate(WAV_HEADER_SIZE)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .apply {
+                    put("RIFF".toByteArray(Charsets.US_ASCII))
+                    putInt(riffChunkSize.toInt())
+
+                    put("WAVE".toByteArray(Charsets.US_ASCII))
+
+                    put("fmt ".toByteArray(Charsets.US_ASCII))
+                    putInt(16)
+
+                    putShort(PCM_FORMAT_CODE.toShort())
+                    putShort(channels.toShort())
+                    putInt(sampleRate)
+                    putInt(byteRate)
+                    putShort(blockAlign.toShort())
+                    putShort(bitsPerSample.toShort())
+
+                    put("data".toByteArray(Charsets.US_ASCII))
+                    putInt(pcmDataSize.toInt())
+                }
+                .array()
+
+            randomAccessFile.seek(0)
+            randomAccessFile.write(header)
         }
     }
 
     private fun requestAudioFocus() {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
             val attributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .setUsage(
+                    AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
+                )
+                .setContentType(
+                    AudioAttributes.CONTENT_TYPE_SPEECH
+                )
                 .build()
 
             val request = AudioFocusRequest.Builder(
@@ -348,49 +455,39 @@ class GeminiAudioPlayer(
             )
                 .setAudioAttributes(attributes)
                 .setOnAudioFocusChangeListener { focusChange ->
-
                     when (focusChange) {
-
                         AudioManager.AUDIOFOCUS_LOSS,
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                            pause()
-                        }
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> pause()
 
-                        AudioManager.AUDIOFOCUS_GAIN -> {
-                            resume()
-                        }
+                        AudioManager.AUDIOFOCUS_GAIN -> resume()
                     }
                 }
                 .build()
 
             audioFocusRequest = request
-
             audioManager.requestAudioFocus(request)
 
         } else {
-
             @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
-                {
-                    when (it) {
-                        AudioManager.AUDIOFOCUS_LOSS,
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                            pause()
-                        }
-
-                        AudioManager.AUDIOFOCUS_GAIN -> {
-                            resume()
-                        }
-                    }
-                },
+                legacyFocusChangeListener,
                 AudioManager.STREAM_ACCESSIBILITY,
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             )
         }
     }
 
-    private fun abandonAudioFocus() {
+    private val legacyFocusChangeListener =
+        AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> pause()
 
+                AudioManager.AUDIOFOCUS_GAIN -> resume()
+            }
+        }
+
+    private fun abandonAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
             audioFocusRequest?.let {
@@ -400,28 +497,31 @@ class GeminiAudioPlayer(
             audioFocusRequest = null
 
         } else {
-            /*
-             * On pre-O devices the exact listener instance would need to
-             * be retained to abandon focus correctly. Modern Android
-             * versions use AudioFocusRequest.
-             */
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(
+                legacyFocusChangeListener
+            )
         }
     }
 
     private fun releaseAudioTrack() {
-
         val track = audioTrack ?: return
 
         audioTrack = null
 
         try {
-            track.stop()
-        } catch (_: IllegalStateException) {
+            track.pause()
+        } catch (_: Exception) {
         }
 
         try {
             track.flush()
-        } catch (_: IllegalStateException) {
+        } catch (_: Exception) {
+        }
+
+        try {
+            track.stop()
+        } catch (_: Exception) {
         }
 
         try {
