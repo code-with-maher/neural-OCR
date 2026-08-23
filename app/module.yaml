@@ -1,4 +1,4 @@
-Product: android/app
+product: android/app
 
 dependencies:
   - bom: $libs.androidx.compose.bom
@@ -14,7 +14,7 @@ dependencies:
   - $libs.okhttp
   - $libs.androidx.room.runtime
   - $libs.androidx.room.ktx
-  - $libs.androidx.room.common # <-- إضافة صريحة لضمان حل الأنواع في K2 Analysis
+  - $libs.androidx.room.common
   - $libs.androidx.work.runtime.ktx
   - $libs.pdfbox.android
   - $libs.androidx.media3.exoplayer
