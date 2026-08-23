@@ -1,6 +1,7 @@
 package com.a.labs.data.remote.api
 
 import android.content.Context
+import android.util.Base64
 import com.a.labs.core.GeminiModels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,54 +12,53 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 @Serializable
-private data class TtsRequest(
-    val contents: List<TtsContent>,
-    val generationConfig: TtsGenerationConfig
+private data class InteractionRequest(
+    val model: String,
+    val input: String,
+    val response_format: AudioResponseFormat,
+    val generation_config: GenerationConfig,
+    val stream: Boolean = true
 )
 
 @Serializable
-private data class TtsContent(val parts: List<TtsPart>)
-
-@Serializable
-private data class TtsPart(val text: String)
-
-@Serializable
-private data class TtsGenerationConfig(
-    val responseModalities: List<String> = listOf("AUDIO"),
-    val speechConfig: TtsSpeechConfig? = null
+private data class AudioResponseFormat(
+    val type: String = "audio",
+    val mime_type: String = "audio/l16",
+    val delivery: String = "inline"
 )
 
 @Serializable
-private data class TtsSpeechConfig(val voiceConfig: TtsVoiceConfig)
+private data class GenerationConfig(
+    val speech_config: List<SpeechConfig>
+)
 
 @Serializable
-private data class TtsVoiceConfig(val prebuiltVoiceConfig: TtsPrebuiltVoiceConfig)
+private data class SpeechConfig(
+    val voice: String
+)
 
 @Serializable
-private data class TtsPrebuiltVoiceConfig(val voiceName: String)
+private data class SseEvent(
+    val event_type: String? = null,
+    val index: Int? = null,
+    val delta: AudioDelta? = null
+)
 
 @Serializable
-private data class TtsResponse(val candidates: List<TtsCandidate>? = null)
-
-@Serializable
-private data class TtsCandidate(val content: TtsResponseContent? = null)
-
-@Serializable
-private data class TtsResponseContent(val parts: List<TtsResponsePart>? = null)
-
-@Serializable
-private data class TtsResponsePart(val inlineData: TtsInlineData? = null)
-
-@Serializable
-private data class TtsInlineData(
-    val mimeType: String? = null,
-    val data: String? = null 
+private data class AudioDelta(
+    val type: String? = null,
+    val data: String? = null,
+    val mime_type: String? = null,
+    val sample_rate: Int? = null,
+    val channels: Int? = null
 )
 
 class GeminiTtsClient(
@@ -66,67 +66,288 @@ class GeminiTtsClient(
     private val client: OkHttpClient,
     private val apiKey: String
 ) {
-    private val jsonConfig = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    suspend fun generateSpeech(text: String, fileName: String, voiceName: String = "Aoede"): Result<File> = withContext(Dispatchers.IO) {
+    private val jsonConfig = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    companion object {
+        private const val DEFAULT_MODEL = "gemini-3.1-flash-tts-preview"
+        private const val SAMPLE_RATE = 24_000
+        private const val CHANNELS = 1
+        private const val BITS_PER_SAMPLE = 16
+    }
+
+    /**
+     * Generates speech through the Gemini Interactions API.
+     *
+     * Audio is streamed as PCM chunks while the model is generating.
+     *
+     * @param text Text to synthesize.
+     * @param fileName Name of the resulting WAV file without extension.
+     * @param voiceName Gemini prebuilt voice name.
+     * @param onAudioChunk Called immediately whenever a PCM audio chunk arrives.
+     *
+     * @return The final WAV file after the complete stream finishes.
+     */
+    suspend fun generateSpeech(
+        text: String,
+        fileName: String,
+        voiceName: String = "Aoede",
+        onAudioChunk: (ByteArray) -> Unit = {}
+    ): Result<File> = withContext(Dispatchers.IO) {
+
+        val pcmChunks = ArrayList<ByteArray>()
+        var totalPcmSize = 0
+
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/${GeminiModels.TTS_MODEL}:generateContent?key=$apiKey"
-            val requestBodyDto = TtsRequest(
-                contents = listOf(TtsContent(listOf(TtsPart(text)))),
-                generationConfig = TtsGenerationConfig(
-                    speechConfig = TtsSpeechConfig(TtsVoiceConfig(TtsPrebuiltVoiceConfig(voiceName)))
-                )
+            val url =
+                "https://generativelanguage.googleapis.com/v1beta/interactions"
+
+            val requestBodyDto = InteractionRequest(
+                model = GeminiModels.TTS_MODEL.ifBlank {
+                    DEFAULT_MODEL
+                },
+                input = text,
+                response_format = AudioResponseFormat(
+                    type = "audio",
+                    mime_type = "audio/l16",
+                    delivery = "inline"
+                ),
+                generation_config = GenerationConfig(
+                    speech_config = listOf(
+                        SpeechConfig(
+                            voice = voiceName
+                        )
+                    )
+                ),
+                stream = true
             )
+
             val jsonBody = jsonConfig.encodeToString(requestBodyDto)
+
             val request = Request.Builder()
                 .url(url)
-                .post(jsonBody.toRequestBody("application/json".toMediaType()))
+                .header("x-goog-api-key", apiKey)
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .post(
+                    jsonBody.toRequestBody(
+                        "application/json".toMediaType()
+                    )
+                )
                 .build()
 
-            val response = client.newCall(request).execute()
-            val responseString = response.body.string()
+            client.newCall(request).execute().use { response ->
 
-            if (response.isSuccessful && responseString.isNotEmpty()) {
-                val ttsResponse = jsonConfig.decodeFromString<TtsResponse>(responseString)
-                val base64Audio = ttsResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.inlineData?.data
-                if (base64Audio != null) {
-                    val audioBytes = android.util.Base64.decode(base64Audio, android.util.Base64.DEFAULT)
-                    val outputFile = File(context.cacheDir, "$fileName.wav")
-                    saveAsWav(audioBytes, outputFile, 24000, 1)
-                    Result.success(outputFile)
-                } else {
-                    Result.failure(Exception("No audio data found in response"))
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string().orEmpty()
+
+                    return@withContext Result.failure(
+                        Exception(
+                            "Gemini Interactions API error: " +
+                                "${response.code} - $errorBody"
+                        )
+                    )
                 }
-            } else {
-                Result.failure(Exception("API Error: ${response.code} - $responseString"))
+
+                val responseBody = response.body
+                    ?: return@withContext Result.failure(
+                        Exception("Empty response body from Gemini")
+                    )
+
+                BufferedReader(
+                    InputStreamReader(
+                        responseBody.byteStream(),
+                        Charsets.UTF_8
+                    )
+                ).use { reader ->
+
+                    var currentEventType: String? = null
+
+                    while (true) {
+                        val line = reader.readLine() ?: break
+
+                        /*
+                         * SSE format:
+                         *
+                         * event: step.delta
+                         * data: {...}
+                         *
+                         * data: [DONE]
+                         */
+
+                        when {
+                            line.startsWith("event:") -> {
+                                currentEventType =
+                                    line.substringAfter("event:")
+                                        .trim()
+                            }
+
+                            line.startsWith("data:") -> {
+                                val data =
+                                    line.substringAfter("data:")
+                                        .trim()
+
+                                if (data.isEmpty() || data == "[DONE]") {
+                                    continue
+                                }
+
+                                try {
+                                    val event =
+                                        jsonConfig.decodeFromString<SseEvent>(
+                                            data
+                                        )
+
+                                    /*
+                                     * Audio arrives as:
+                                     *
+                                     * event_type = step.delta
+                                     * delta.type = audio
+                                     * delta.data = BASE64 PCM
+                                     */
+                                    if (
+                                        currentEventType == "step.delta" &&
+                                        event.delta?.type == "audio"
+                                    ) {
+                                        val base64Audio =
+                                            event.delta.data
+
+                                        if (!base64Audio.isNullOrEmpty()) {
+
+                                            val audioBytes =
+                                                Base64.decode(
+                                                    base64Audio,
+                                                    Base64.DEFAULT
+                                                )
+
+                                            if (audioBytes.isNotEmpty()) {
+
+                                                /*
+                                                 * Keep a copy for the
+                                                 * final WAV file.
+                                                 */
+                                                pcmChunks.add(audioBytes)
+                                                totalPcmSize += audioBytes.size
+
+                                                /*
+                                                 * Immediately deliver the
+                                                 * PCM chunk to the playback
+                                                 * layer.
+                                                 */
+                                                onAudioChunk(audioBytes)
+                                            }
+                                        }
+                                    }
+
+                                } catch (e: Exception) {
+                                    /*
+                                     * Ignore malformed/non-audio SSE
+                                     * events. The stream contains many
+                                     * event types that are irrelevant to
+                                     * audio playback.
+                                     */
+                                }
+                            }
+
+                            line.isEmpty() -> {
+                                /*
+                                 * End of one SSE event.
+                                 */
+                                currentEventType = null
+                            }
+                        }
+                    }
+                }
+
+                if (totalPcmSize == 0) {
+                    return@withContext Result.failure(
+                        Exception("No audio data received from Gemini")
+                    )
+                }
+
+                /*
+                 * The streaming API gives us raw PCM.
+                 *
+                 * We assemble all chunks only after streaming has
+                 * completed, then write one valid WAV file.
+                 */
+                val outputFile =
+                    File(context.cacheDir, "$fileName.wav")
+
+                savePcmAsWav(
+                    pcmChunks = pcmChunks,
+                    totalPcmSize = totalPcmSize,
+                    file = outputFile,
+                    sampleRate = SAMPLE_RATE,
+                    channels = CHANNELS
+                )
+
+                Result.success(outputFile)
             }
+
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    private fun saveAsWav(pcmData: ByteArray, file: File, sampleRate: Int, channels: Int) {
-        val totalDataLen = pcmData.size +  36
-        val byteRate = sampleRate * channels * 2
-        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
-            put("RIFF".toByteArray())
-            putInt(totalDataLen)
-            put("WAVE".toByteArray())
-            put("fmt ".toByteArray())
-            putInt(16)
-            putShort(1.toShort())
-            putShort(channels.toShort())
-            putInt(sampleRate)
-            putInt(byteRate)
-            putShort((channels * 2).toShort())
-            putShort(16.toShort())
-            put("data".toByteArray())
-            putInt(pcmData.size)
-        }.array()
+    /**
+     * Writes streamed PCM chunks into a standard WAV file.
+     */
+    private fun savePcmAsWav(
+        pcmChunks: List<ByteArray>,
+        totalPcmSize: Int,
+        file: File,
+        sampleRate: Int,
+        channels: Int
+    ) {
+        val bitsPerSample = BITS_PER_SAMPLE
+
+        val byteRate =
+            sampleRate *
+                channels *
+                bitsPerSample / 8
+
+        val blockAlign =
+            channels *
+                bitsPerSample / 8
+
+        val totalFileSize = totalPcmSize + 36
+
+        val header = ByteBuffer
+            .allocate(44)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .apply {
+                put("RIFF".toByteArray(Charsets.US_ASCII))
+                putInt(totalFileSize)
+
+                put("WAVE".toByteArray(Charsets.US_ASCII))
+
+                put("fmt ".toByteArray(Charsets.US_ASCII))
+                putInt(16)
+
+                // PCM format
+                putShort(1.toShort())
+
+                putShort(channels.toShort())
+                putInt(sampleRate)
+                putInt(byteRate)
+                putShort(blockAlign.toShort())
+                putShort(bitsPerSample.toShort())
+
+                put("data".toByteArray(Charsets.US_ASCII))
+                putInt(totalPcmSize)
+            }
+            .array()
 
         FileOutputStream(file).use { output ->
+
             output.write(header)
-            output.write(pcmData)
+
+            for (chunk in pcmChunks) {
+                output.write(chunk)
+            }
         }
-     }
+    }
 }
