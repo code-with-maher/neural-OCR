@@ -1,4 +1,4 @@
-product: android/app
+Product: android/app
 
 dependencies:
   - bom: $libs.androidx.compose.bom
@@ -14,6 +14,7 @@ dependencies:
   - $libs.okhttp
   - $libs.androidx.room.runtime
   - $libs.androidx.room.ktx
+  - $libs.androidx.room.common # <-- إضافة صريحة لضمان حل الأنواع في K2 Analysis
   - $libs.androidx.work.runtime.ktx
   - $libs.pdfbox.android
   - $libs.androidx.media3.exoplayer
@@ -27,10 +28,7 @@ settings:
       processors:
         - $libs.androidx.room.compiler
       processorOptions:
-        room.schemaLocation: ./schemas
-    serialization:
-      format: json
-      version: "1.11.0"
+        room.schemaLocation: "schemas"
   compose:
     enabled: true
   android:
