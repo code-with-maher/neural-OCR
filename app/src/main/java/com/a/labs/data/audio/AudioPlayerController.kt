@@ -54,8 +54,8 @@ object TtsEngineId {
 }
 
 private enum class PlaybackBackend {
-    SYSTEM_TTS,
-    GEMINI_STREAM,
+    SYSTEM,
+    GEMINI,
     MEDIA3
 }
 
@@ -66,86 +66,57 @@ class AudioPlayerController(
 ) {
     private val appContext = context.applicationContext
 
-    private var controllerFuture: ListenableFuture<MediaController>? = null
-
-    private val connectedControllerOrNull: MediaController?
-        get() = if (controllerFuture?.isDone == true) {
-            try {
-                controllerFuture?.get()
-            } catch (_: Exception) {
-                null
-            }
-        } else {
-            null
-        }
-
-    private val _audioState = MutableStateFlow(AudioState.IDLE)
-    val audioState: StateFlow<AudioState> = _audioState.asStateFlow()
-
-    private val _highlightedParagraphIndex = MutableStateFlow(-1)
-    val highlightedParagraphIndex: StateFlow<Int> =
-        _highlightedParagraphIndex.asStateFlow()
-
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> =
-        _errorMessage.asStateFlow()
-
     private val scope =
         CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val generationScope =
+    private val ioScope =
         CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private var progressJob: Job? = null
-    private var generationJob: Job? = null
-
-    private var loadedBookId: String? = null
-    private var loadedPageNum: Int = -1
-
-    private var activeBackend =
-        PlaybackBackend.SYSTEM_TTS
-
-    private var currentParagraphsCount = 1
-    private var userIntendedToPlay = false
-
-    private var geminiClient: GeminiTtsClient? = null
-
     private val audioManager =
-        appContext.getSystemService(Context.AUDIO_SERVICE)
-            as AudioManager
+        appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val notificationManager =
         appContext.getSystemService(Context.NOTIFICATION_SERVICE)
             as NotificationManager
 
-    private val focusChangeListener =
-        AudioManager.OnAudioFocusChangeListener { focusChange ->
+    private val httpClient =
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.MINUTES)
+            .readTimeout(15, TimeUnit.MINUTES)
+            .writeTimeout(15, TimeUnit.MINUTES)
+            .callTimeout(15, TimeUnit.MINUTES)
+            .build()
 
-            if (activeBackend != PlaybackBackend.SYSTEM_TTS) {
-                return@OnAudioFocusChangeListener
-            }
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var generationJob: Job? = null
+    private var highlightJob: Job? = null
 
-            when (focusChange) {
+    private var geminiTts: GeminiTtsClient? = null
 
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    if (_audioState.value == AudioState.PLAYING) {
-                        systemTts.stop(manual = false)
-                    }
-                }
+    private var currentBookId: String? = null
+    private var currentPageNumber = -1
+    private var paragraphCount = 1
 
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    if (userIntendedToPlay) {
-                        systemTts.resume()
-                    }
-                }
+    private var backend = PlaybackBackend.SYSTEM
+    private var userWantsPlayback = false
 
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    userIntendedToPlay = false
-                    systemTts.stop(manual = true)
-                }
-            }
-        }
+    private val _audioState =
+        MutableStateFlow(AudioState.IDLE)
+
+    val audioState: StateFlow<AudioState> =
+        _audioState.asStateFlow()
+
+    private val _highlightedParagraphIndex =
+        MutableStateFlow(-1)
+
+    val highlightedParagraphIndex: StateFlow<Int> =
+        _highlightedParagraphIndex.asStateFlow()
+
+    private val _errorMessage =
+        MutableStateFlow<String?>(null)
+
+    val errorMessage: StateFlow<String?> =
+        _errorMessage.asStateFlow()
 
     private val systemTts =
         SystemTtsWrapper(appContext).apply {
@@ -159,18 +130,37 @@ class AudioPlayerController(
                     }
             }
 
-            onHighlightProgress = { index ->
-                _highlightedParagraphIndex.value = index
+            onHighlightProgress = {
+                _highlightedParagraphIndex.value = it
             }
         }
 
-    private val httpClient =
-        OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.MINUTES)
-            .readTimeout(15, TimeUnit.MINUTES)
-            .writeTimeout(15, TimeUnit.MINUTES)
-            .callTimeout(15, TimeUnit.MINUTES)
-            .build()
+    private val focusListener =
+        AudioManager.OnAudioFocusChangeListener { change ->
+
+            if (backend != PlaybackBackend.SYSTEM) return@OnAudioFocusChangeListener
+
+            when (change) {
+
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    if (_audioState.value == AudioState.PLAYING) {
+                        systemTts.stop(manual = false)
+                    }
+                }
+
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    if (userWantsPlayback) {
+                        systemTts.resume()
+                    }
+                }
+
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    userWantsPlayback = false
+                    systemTts.stop(manual = true)
+                }
+            }
+        }
 
     init {
         createNotificationChannel()
@@ -182,13 +172,11 @@ class AudioPlayerController(
             controllerFuture != null &&
             controllerFuture?.isCancelled == false
         ) {
-            connectedControllerOrNull?.let {
-                syncStateFromController(it)
-            }
+            connectedController?.let(::syncControllerState)
             return
         }
 
-        val sessionToken =
+        val token =
             SessionToken(
                 appContext,
                 ComponentName(
@@ -200,11 +188,10 @@ class AudioPlayerController(
         controllerFuture =
             MediaController.Builder(
                 appContext,
-                sessionToken
+                token
             )
                 .setListener(
                     object : MediaController.Listener {
-
                         override fun onDisconnected(
                             controller: MediaController
                         ) {
@@ -214,39 +201,45 @@ class AudioPlayerController(
                 )
                 .buildAsync()
                 .also { future ->
-
                     future.addListener(
-                        {
-                            onControllerConnected(future)
-                        },
+                        { onControllerReady(future) },
                         MoreExecutors.directExecutor()
                     )
                 }
     }
 
-    private fun onControllerConnected(
+    private val connectedController: MediaController?
+        get() =
+            if (controllerFuture?.isDone == true) {
+                try {
+                    controllerFuture?.get()
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+
+    private fun onControllerReady(
         future: ListenableFuture<MediaController>
     ) {
-        val mediaController =
+        val controller =
             try {
                 future.get()
             } catch (e: Exception) {
-                _audioState.value = AudioState.ERROR
-                _errorMessage.value = e.message
+                setError(e)
                 return
             }
 
-        syncStateFromController(mediaController)
+        syncControllerState(controller)
 
-        mediaController.addListener(
+        controller.addListener(
             object : Player.Listener {
 
                 override fun onIsPlayingChanged(
                     isPlaying: Boolean
                 ) {
-                    if (activeBackend != PlaybackBackend.MEDIA3) {
-                        return
-                    }
+                    if (backend != PlaybackBackend.MEDIA3) return
 
                     _audioState.value =
                         if (isPlaying) {
@@ -256,112 +249,91 @@ class AudioPlayerController(
                         }
 
                     if (isPlaying) {
-                        startHighlightUpdate()
+                        startHighlightUpdates()
                     } else {
-                        stopHighlightUpdate()
+                        stopHighlightUpdates()
                     }
                 }
 
                 override fun onPlaybackStateChanged(
                     state: Int
                 ) {
-                    if (activeBackend != PlaybackBackend.MEDIA3) {
-                        return
-                    }
+                    if (backend != PlaybackBackend.MEDIA3) return
 
-                    _audioState.value =
-                        when (state) {
+                    when (state) {
 
-                            Player.STATE_ENDED -> {
-                                userIntendedToPlay = false
-                                _highlightedParagraphIndex.value = -1
-                                AudioState.PAUSED
-                            }
+                        Player.STATE_BUFFERING ->
+                            _audioState.value =
+                                AudioState.PROCESSING
 
-                            Player.STATE_READY -> {
-                                if (mediaController.isPlaying) {
+                        Player.STATE_READY ->
+                            _audioState.value =
+                                if (controller.isPlaying) {
                                     AudioState.PLAYING
                                 } else {
                                     AudioState.PAUSED
                                 }
-                            }
 
-                            Player.STATE_BUFFERING ->
-                                AudioState.PROCESSING
-
-                            Player.STATE_IDLE ->
-                                AudioState.IDLE
-
-                            else ->
-                                _audioState.value
+                        Player.STATE_ENDED -> {
+                            userWantsPlayback = false
+                            _highlightedParagraphIndex.value = -1
+                            _audioState.value = AudioState.PAUSED
                         }
+
+                        Player.STATE_IDLE ->
+                            _audioState.value = AudioState.IDLE
+                    }
                 }
 
                 override fun onPlayerError(
                     error: PlaybackException
                 ) {
-                    _audioState.value = AudioState.ERROR
-                    userIntendedToPlay = false
-                    _errorMessage.value = error.message
+                    setError(error)
                 }
             }
         )
     }
 
-    private fun syncStateFromController(
-        mediaController: MediaController
+    private fun syncControllerState(
+        controller: MediaController
     ) {
-        if (loadedBookId == null) {
+        if (currentBookId == null) {
 
-            val restored =
-                mediaController.currentMediaItem
-                    ?.mediaId
-                    ?.split("::")
-                    ?.takeIf { it.size == 2 }
-                    ?.let {
-                        it[0] to it[1].toIntOrNull()
-                    }
+            val mediaId =
+                controller.currentMediaItem?.mediaId
                     ?: return
 
-            val restoredBookId = restored.first
-            val restoredPage = restored.second
+            val parts = mediaId.split("::")
 
-            if (restoredPage == null) {
-                return
-            }
+            if (parts.size != 2) return
 
-            loadedBookId = restoredBookId
-            loadedPageNum = restoredPage
-            activeBackend = PlaybackBackend.MEDIA3
+            val page = parts[1].toIntOrNull()
+                ?: return
 
-            generationScope.launch {
+            currentBookId = parts[0]
+            currentPageNumber = page
+            backend = PlaybackBackend.MEDIA3
+
+            ioScope.launch {
                 repository
-                    .getPageByNumber(
-                        restoredBookId,
-                        restoredPage
-                    )
-                    ?.let { page ->
-
-                        currentParagraphsCount =
-                            page.markdownContent
-                                .split("\n\n")
-                                .count { it.isNotBlank() }
+                    .getPageByNumber(parts[0], page)
+                    ?.let {
+                        paragraphCount =
+                            paragraphCount(it.markdownContent)
                     }
             }
         }
 
-        if (activeBackend != PlaybackBackend.MEDIA3) {
-            return
-        }
+        if (backend != PlaybackBackend.MEDIA3) return
 
-        userIntendedToPlay = mediaController.isPlaying
+        userWantsPlayback = controller.isPlaying
 
         _audioState.value =
             when {
-                mediaController.isPlaying ->
+                controller.isPlaying ->
                     AudioState.PLAYING
 
-                mediaController.playbackState ==
+                controller.playbackState ==
                     Player.STATE_BUFFERING ->
                     AudioState.PROCESSING
 
@@ -369,11 +341,285 @@ class AudioPlayerController(
                     AudioState.PAUSED
             }
 
-        if (mediaController.isPlaying) {
-            startHighlightUpdate()
-        } else {
-            stopHighlightUpdate()
+        if (controller.isPlaying) {
+            startHighlightUpdates()
         }
+    }
+
+    fun playPage(
+        bookId: String,
+        pageNumber: Int
+    ) {
+        generationJob?.cancel()
+
+        generationJob =
+            ioScope.launch {
+
+                val engine =
+                    settingsManager.ttsEngine.first()
+
+                val samePage =
+                    currentBookId == bookId &&
+                        currentPageNumber == pageNumber
+
+                if (samePage) {
+                    toggle()
+                    return@launch
+                }
+
+                stop()
+
+                currentBookId = bookId
+                currentPageNumber = pageNumber
+                userWantsPlayback = true
+
+                val page =
+                    repository.getPageByNumber(
+                        bookId,
+                        pageNumber
+                    ) ?: return@launch
+
+                paragraphCount =
+                    paragraphCount(page.markdownContent)
+
+                when (engine) {
+
+                    TtsEngineId.SYSTEM -> {
+                        backend = PlaybackBackend.SYSTEM
+                        playSystem(page)
+                    }
+
+                    TtsEngineId.GEMINI_TTS -> {
+                        backend = PlaybackBackend.GEMINI
+                        playGemini(
+                            page,
+                            bookId,
+                            pageNumber
+                        )
+                    }
+
+                    else -> {
+                        setError(
+                            Exception(
+                                "Unsupported TTS engine: $engine"
+                            )
+                        )
+                    }
+                }
+            }
+    }
+
+    private suspend fun playSystem(
+        page: PageEntity
+    ) {
+        pauseMedia3()
+
+        systemTts.stop(manual = true)
+        requestSystemAudioFocus()
+
+        _audioState.value = AudioState.PLAYING
+
+        systemTts.speak(
+            page.markdownContent
+        )
+    }
+
+    private suspend fun playGemini(
+        page: PageEntity,
+        bookId: String,
+        pageNumber: Int
+    ) {
+        pauseMedia3()
+        systemTts.stop(manual = true)
+        abandonSystemAudioFocus()
+
+        val apiKey =
+            settingsManager.geminiKey.first()
+
+        if (apiKey.isBlank()) {
+            setError(
+                Exception("Gemini API key is missing")
+            )
+            return
+        }
+
+        val client =
+            GeminiTtsClient(
+                context = appContext,
+                client = httpClient,
+                apiKey = apiKey
+            )
+
+        geminiTts = client
+
+        _audioState.value =
+            AudioState.PROCESSING
+
+        showGenerationNotification()
+
+        val result =
+            try {
+                client.generateSpeech(
+                    text = page.markdownContent,
+                    fileName =
+                        "audio_${bookId}_$pageNumber"
+                )
+            } finally {
+                notificationManager.cancel(
+                    GENERATION_NOTIFICATION_ID
+                )
+            }
+
+        geminiTts = null
+
+        if (!userWantsPlayback) return
+
+        val file = result.getOrNull()
+
+        if (file == null) {
+            setError(
+                result.exceptionOrNull()
+                    ?: Exception("Gemini TTS failed")
+            )
+            return
+        }
+
+        repository.insertPages(
+            listOf(
+                page.copy(
+                    audioUri = file.absolutePath
+                )
+            )
+        )
+
+        /*
+         * GeminiAudioPlayer has already handled
+         * streaming playback.
+         *
+         * The file is now persisted for future
+         * Media3 playback.
+         */
+        _audioState.value = AudioState.PAUSED
+    }
+
+    private suspend fun pauseMedia3() {
+        withController {
+            pause()
+        }
+    }
+
+    private suspend fun toggle() {
+        when (backend) {
+
+            PlaybackBackend.SYSTEM -> {
+                if (_audioState.value == AudioState.PLAYING) {
+                    userWantsPlayback = false
+                    systemTts.stop(manual = true)
+                } else {
+                    userWantsPlayback = true
+                    requestSystemAudioFocus()
+                    systemTts.resume()
+                }
+            }
+
+            PlaybackBackend.GEMINI -> {
+                if (_audioState.value == AudioState.PLAYING) {
+                    userWantsPlayback = false
+                    geminiTts?.pause()
+                } else {
+                    userWantsPlayback = true
+                    geminiTts?.resume()
+                }
+            }
+
+            PlaybackBackend.MEDIA3 -> {
+                if (_audioState.value == AudioState.PLAYING) {
+                    userWantsPlayback = false
+                    withController { pause() }
+                } else {
+                    userWantsPlayback = true
+                    withController { play() }
+                }
+            }
+        }
+    }
+
+    fun seekForward() {
+        seek(SEEK_STEP_MS)
+    }
+
+    fun seekBackward() {
+        seek(-SEEK_STEP_MS)
+    }
+
+    private fun seek(delta: Long) {
+        scope.launch {
+            withController {
+                seekTo(
+                    (currentPosition + delta)
+                        .coerceAtLeast(0)
+                )
+            }
+        }
+    }
+
+    private fun startHighlightUpdates() {
+        highlightJob?.cancel()
+
+        highlightJob =
+            scope.launch {
+
+                while (true) {
+
+                    val controller =
+                        connectedController
+                            ?: break
+
+                    val duration =
+                        controller.duration
+
+                    if (duration > 0) {
+
+                        val ratio =
+                            controller.currentPosition
+                                .toFloat() /
+                                duration.toFloat()
+
+                        _highlightedParagraphIndex.value =
+                            (
+                                ratio * paragraphCount
+                            )
+                                .toInt()
+                                .coerceIn(
+                                    0,
+                                    paragraphCount - 1
+                                )
+                    }
+
+                    delay(HIGHLIGHT_INTERVAL)
+                }
+            }
+    }
+
+    private fun stopHighlightUpdates() {
+        highlightJob?.cancel()
+        highlightJob = null
+    }
+
+    private suspend fun stop() {
+        userWantsPlayback = false
+
+        geminiTts?.stop()
+        geminiTts = null
+
+        systemTts.stop(manual = true)
+
+        withController {
+            pause()
+        }
+
+        abandonSystemAudioFocus()
+        stopHighlightUpdates()
     }
 
     private suspend fun <T> withController(
@@ -387,19 +633,15 @@ class AudioPlayerController(
                 controllerFuture
                     ?: return@withContext null
 
-            val mediaController =
+            val controller =
                 if (future.isDone) {
-
                     try {
                         future.get()
                     } catch (_: Exception) {
                         null
                     }
-
                 } else {
-
-                    suspendCancellableCoroutine { cont ->
-
+                    suspendCancellableCoroutine { continuation ->
                         future.addListener(
                             {
                                 val result =
@@ -409,8 +651,8 @@ class AudioPlayerController(
                                         null
                                     }
 
-                                if (cont.isActive) {
-                                    cont.resume(result)
+                                if (continuation.isActive) {
+                                    continuation.resume(result)
                                 }
                             },
                             MoreExecutors.directExecutor()
@@ -418,372 +660,8 @@ class AudioPlayerController(
                     }
                 }
 
-            mediaController?.action()
+            controller?.action()
         }
-
-    fun playPage(
-        bookId: String,
-        pageNumber: Int
-    ) {
-        connect()
-
-        generationJob?.cancel()
-
-        generationJob =
-            generationScope.launch {
-
-                val engineId =
-                    settingsManager.ttsEngine.first()
-
-                val isSamePage =
-                    loadedBookId == bookId &&
-                        loadedPageNum == pageNumber
-
-                if (
-                    isSamePage &&
-                    _audioState.value != AudioState.ERROR
-                ) {
-                    toggleActivePage()
-                    return@launch
-                }
-
-                stopCurrentPlayback()
-
-                loadedBookId = bookId
-                loadedPageNum = pageNumber
-                userIntendedToPlay = true
-
-                val page =
-                    repository.getPageByNumber(
-                        bookId,
-                        pageNumber
-                    ) ?: return@launch
-
-                currentParagraphsCount =
-                    page.markdownContent
-                        .split("\n\n")
-                        .count { it.isNotBlank() }
-
-                when (engineId) {
-
-                    TtsEngineId.SYSTEM -> {
-                        activeBackend =
-                            PlaybackBackend.SYSTEM_TTS
-
-                        startSystemTts(page)
-                    }
-
-                    TtsEngineId.GEMINI_TTS -> {
-                        activeBackend =
-                            PlaybackBackend.GEMINI_STREAM
-
-                        startGeminiPlayback(
-                            page,
-                            bookId,
-                            pageNumber
-                        )
-                    }
-
-                    else -> {
-                        _audioState.value =
-                            AudioState.ERROR
-
-                        _errorMessage.value =
-                            "محرك الصوت غير مدعوم حالياً."
-                    }
-                }
-            }
-    }
-
-    private suspend fun toggleActivePage() {
-        when (activeBackend) {
-
-            PlaybackBackend.SYSTEM_TTS,
-            PlaybackBackend.GEMINI_STREAM -> {
-
-                if (_audioState.value ==
-                    AudioState.PLAYING
-                ) {
-                    userIntendedToPlay = false
-                    pauseInternal()
-                } else {
-                    userIntendedToPlay = true
-                    resumeInternal()
-                }
-            }
-
-            PlaybackBackend.MEDIA3 -> {
-
-                if (_audioState.value ==
-                    AudioState.PLAYING
-                ) {
-                    userIntendedToPlay = false
-                    pauseInternal()
-                } else {
-                    userIntendedToPlay = true
-                    resumeInternal()
-                }
-            }
-        }
-    }
-
-    private suspend fun startSystemTts(
-        page: PageEntity
-    ) {
-        withController {
-            pause()
-        }
-
-        systemTts.stop(manual = true)
-
-        requestSystemAudioFocus()
-
-        _audioState.value = AudioState.PLAYING
-
-        systemTts.speak(
-            page.markdownContent
-        )
-    }
-
-    private suspend fun startGeminiPlayback(
-        page: PageEntity,
-        bookId: String,
-        pageNumber: Int
-    ) {
-        systemTts.stop(manual = true)
-        abandonSystemAudioFocus()
-
-        val apiKey =
-            settingsManager.geminiKey.first()
-
-        if (apiKey.isBlank()) {
-            _audioState.value = AudioState.ERROR
-            _errorMessage.value =
-                "مفتاح Gemini غير موجود."
-            return
-        }
-
-        val client =
-            GeminiTtsClient(
-                context = appContext,
-                client = httpClient,
-                apiKey = apiKey
-            )
-
-        geminiClient = client
-
-        _audioState.value =
-            AudioState.PROCESSING
-
-        showGenerationNotification()
-
-        val result =
-            client.generateSpeech(
-                text = page.markdownContent,
-                fileName =
-                    "audio_${bookId}_$pageNumber"
-            )
-
-        notificationManager.cancel(
-            GENERATION_NOTIFICATION_ID
-        )
-
-        geminiClient = null
-
-        if (!userIntendedToPlay) {
-            return
-        }
-
-        val file = result.getOrNull()
-
-        if (file == null) {
-            _audioState.value =
-                AudioState.ERROR
-
-            _errorMessage.value =
-                result.exceptionOrNull()?.message
-                    ?: "فشل في توليد الصوت."
-
-            return
-        }
-
-        repository.insertPages(
-            listOf(
-                page.copy(
-                    audioUri = file.absolutePath
-                )
-            )
-        )
-
-        /*
-         * GeminiAudioPlayer has already played the stream.
-         *
-         * The generated WAV is now ready for subsequent
-         * Media3 playback.
-         */
-        if (_audioState.value != AudioState.PAUSED) {
-            _audioState.value =
-                AudioState.PAUSED
-        }
-    }
-
-    private suspend fun startMedia3Playback(
-        file: File,
-        bookId: String,
-        pageNumber: Int
-    ) {
-        withController {
-
-            setMediaItem(
-                MediaItem.Builder()
-                    .setMediaId(
-                        "$bookId::$pageNumber"
-                    )
-                    .setUri(
-                        file.absolutePath
-                    )
-                    .build()
-            )
-
-            prepare()
-            play()
-        }
-    }
-
-    private suspend fun getExistingAudioFile(
-        page: PageEntity
-    ): File? {
-        return page.audioUri
-            ?.let(::File)
-            ?.takeIf { it.exists() }
-    }
-
-    private suspend fun pauseInternal() {
-        when (activeBackend) {
-
-            PlaybackBackend.SYSTEM_TTS -> {
-                systemTts.stop(
-                    manual = !userIntendedToPlay
-                )
-            }
-
-            PlaybackBackend.GEMINI_STREAM -> {
-                geminiClient?.pause()
-            }
-
-            PlaybackBackend.MEDIA3 -> {
-                withController {
-                    pause()
-                }
-            }
-        }
-    }
-
-    private suspend fun resumeInternal() {
-        when (activeBackend) {
-
-            PlaybackBackend.SYSTEM_TTS -> {
-                requestSystemAudioFocus()
-                systemTts.resume()
-            }
-
-            PlaybackBackend.GEMINI_STREAM -> {
-                geminiClient?.resume()
-            }
-
-            PlaybackBackend.MEDIA3 -> {
-                withController {
-                    play()
-                }
-            }
-        }
-    }
-
-    fun seekForward() {
-        seekBy(SEEK_STEP_MS)
-    }
-
-    fun seekBackward() {
-        seekBy(-SEEK_STEP_MS)
-    }
-
-    private fun seekBy(deltaMs: Long) {
-        scope.launch {
-            withController {
-                seekTo(
-                    (currentPosition + deltaMs)
-                        .coerceAtLeast(0)
-                )
-            }
-        }
-    }
-
-    private fun startHighlightUpdate() {
-        progressJob?.cancel()
-
-        progressJob =
-            scope.launch {
-
-                while (true) {
-
-                    connectedControllerOrNull
-                        ?.let { controller ->
-
-                            val duration =
-                                controller.duration
-
-                            val position =
-                                controller.currentPosition
-
-                            if (duration > 0) {
-
-                                val ratio =
-                                    position.toFloat() /
-                                        duration.toFloat()
-
-                                _highlightedParagraphIndex.value =
-                                    (
-                                        ratio *
-                                            currentParagraphsCount
-                                    )
-                                        .toInt()
-                                        .coerceIn(
-                                            0,
-                                            currentParagraphsCount - 1
-                                        )
-                            }
-                        }
-
-                    delay(
-                        HIGHLIGHT_POLL_INTERVAL_MS
-                    )
-                }
-            }
-    }
-
-    private fun stopHighlightUpdate() {
-        progressJob?.cancel()
-        progressJob = null
-    }
-
-    private suspend fun stopCurrentPlayback() {
-        userIntendedToPlay = false
-
-        generationJob?.cancel()
-
-        geminiClient?.stop()
-        geminiClient = null
-
-        systemTts.stop(manual = true)
-
-        withController {
-            pause()
-        }
-
-        abandonSystemAudioFocus()
-
-        stopHighlightUpdate()
-    }
 
     private fun requestSystemAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -802,20 +680,20 @@ class AudioPlayerController(
 
             audioManager.requestAudioFocus(
                 AudioFocusRequest.Builder(
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                    AudioManager
+                        .AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 )
                     .setAudioAttributes(attributes)
                     .setOnAudioFocusChangeListener(
-                        focusChangeListener
+                        focusListener
                     )
                     .build()
             )
-
         } else {
 
             @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
-                focusChangeListener,
+                focusListener,
                 AudioManager.STREAM_ACCESSIBILITY,
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             )
@@ -839,20 +717,20 @@ class AudioPlayerController(
 
             audioManager.abandonAudioFocusRequest(
                 AudioFocusRequest.Builder(
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                    AudioManager
+                        .AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 )
                     .setAudioAttributes(attributes)
                     .setOnAudioFocusChangeListener(
-                        focusChangeListener
+                        focusListener
                     )
                     .build()
             )
-
         } else {
 
             @Suppress("DEPRECATION")
             audioManager.abandonAudioFocus(
-                focusChangeListener
+                focusListener
             )
         }
     }
@@ -862,7 +740,7 @@ class AudioPlayerController(
 
             notificationManager.createNotificationChannel(
                 NotificationChannel(
-                    GENERATION_NOTIFICATION_CHANNEL,
+                    GENERATION_CHANNEL,
                     "توليد الصوت",
                     NotificationManager.IMPORTANCE_LOW
                 )
@@ -871,10 +749,11 @@ class AudioPlayerController(
     }
 
     private fun showGenerationNotification() {
-        val notification =
+        notificationManager.notify(
+            GENERATION_NOTIFICATION_ID,
             NotificationCompat.Builder(
                 appContext,
-                GENERATION_NOTIFICATION_CHANNEL
+                GENERATION_CHANNEL
             )
                 .setContentTitle(
                     appContext.getString(
@@ -889,11 +768,13 @@ class AudioPlayerController(
                 )
                 .setOngoing(true)
                 .build()
-
-        notificationManager.notify(
-            GENERATION_NOTIFICATION_ID,
-            notification
         )
+    }
+
+    private fun setError(error: Throwable) {
+        _audioState.value = AudioState.ERROR
+        _errorMessage.value = error.message
+        userWantsPlayback = false
     }
 
     fun clearError() {
@@ -901,18 +782,17 @@ class AudioPlayerController(
     }
 
     fun disconnect() {
-        userIntendedToPlay = false
+        userWantsPlayback = false
 
         generationJob?.cancel()
         generationJob = null
 
-        geminiClient?.stop()
-        geminiClient = null
-
-        abandonSystemAudioFocus()
-        stopHighlightUpdate()
+        geminiTts?.stop()
+        geminiTts = null
 
         systemTts.stop(manual = true)
+        abandonSystemAudioFocus()
+        stopHighlightUpdates()
 
         controllerFuture?.let {
             MediaController.releaseFuture(it)
@@ -922,18 +802,20 @@ class AudioPlayerController(
 
     fun release() {
         disconnect()
-
         systemTts.release()
-
         scope.cancel()
-        generationScope.cancel()
+        ioScope.cancel()
     }
+
+    private fun paragraphCount(text: String): Int =
+        text.split("\n\n")
+            .count { it.isNotBlank() }
+            .coerceAtLeast(1)
 
     private companion object {
         const val SEEK_STEP_MS = 10_000L
-        const val HIGHLIGHT_POLL_INTERVAL_MS = 300L
+        const val HIGHLIGHT_INTERVAL = 300L
         const val GENERATION_NOTIFICATION_ID = 2002
-        const val GENERATION_NOTIFICATION_CHANNEL =
-            "audio_gen_channel"
+        const val GENERATION_CHANNEL = "audio_generation"
     }
 }
