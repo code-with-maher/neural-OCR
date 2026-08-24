@@ -27,23 +27,28 @@ import java.util.concurrent.atomic.AtomicReference
 private data class InteractionRequest(
     val model: String,
     val input: String,
-    @SerialName("response_modalities")
-    val responseModalities: List<String> = listOf("audio"),
+    @SerialName("response_format")
+    val responseFormat: ResponseFormat = ResponseFormat(),
     @SerialName("generation_config")
-    val generationConfig: GenerationConfig? = null,
+    val generationConfig: GenerationConfig,
     val stream: Boolean = true
+)
+
+@Serializable
+private data class ResponseFormat(
+    val type: String = "audio"
 )
 
 @Serializable
 private data class GenerationConfig(
     @SerialName("speech_config")
-    val speechConfig: SpeechConfig? = null
+    val speechConfig: List<VoiceConfig>
 )
 
 @Serializable
-private data class SpeechConfig(
+private data class VoiceConfig(
     val voice: String? = null,
-    val language: String? = null
+    val speaker: String? = null
 )
 
 @Serializable
@@ -110,9 +115,11 @@ class GeminiTtsClient(
             val requestBody = InteractionRequest(
                 model = model,
                 input = text,
-                responseModalities = listOf("audio"),
+                responseFormat = ResponseFormat(type = "audio"),
                 generationConfig = GenerationConfig(
-                    speechConfig = SpeechConfig(voice = voiceName)
+                    speechConfig = listOf(
+                        VoiceConfig(voice = voiceName)
+                    )
                 ),
                 stream = true
             )
@@ -124,6 +131,7 @@ class GeminiTtsClient(
                 .header("x-goog-api-key", apiKey)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
+                .header("Api-Revision", "2026-05-20")
                 .post(requestJson.toRequestBody("application/json".toMediaType()))
                 .build()
 
