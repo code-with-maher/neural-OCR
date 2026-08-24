@@ -15,7 +15,8 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.a.labs.ui.ViewModelFactory
+import com.a.labs.ui.LibraryViewModelFactory
+import com.a.labs.ui.ReaderViewModelFactory
 import com.a.labs.ui.library.LibraryScreen
 import com.a.labs.ui.library.LibraryViewModel
 import com.a.labs.ui.reader.ReaderScreen
@@ -53,8 +54,8 @@ private fun ExitToRight(): ExitTransition =
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    factory: ViewModelFactory,
-    readerFactory: ViewModelFactory
+    libraryFactory: LibraryViewModelFactory,
+    readerFactory: ReaderViewModelFactory
 ) {
     NavHost(
         navController = navController,
@@ -67,7 +68,7 @@ fun NavGraph(
             popEnterTransition = { EnterFromLeft() },
             popExitTransition = { ExitToRight() }
         ) {
-            val viewModel: LibraryViewModel = viewModel(factory = factory)
+            val viewModel: LibraryViewModel = viewModel(factory = libraryFactory)
             LibraryScreen(navController, viewModel)
         }
 
