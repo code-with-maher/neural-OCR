@@ -15,16 +15,16 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        
+
         val audioAttributes = AudioAttributes.Builder()
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC) 
+            .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
             .setUsage(C.USAGE_MEDIA)
             .build()
 
         player = ExoPlayer.Builder(this)
-            .setAudioAttributes(audioAttributes, false) 
+            .setAudioAttributes(audioAttributes, true)
             .build()
-            
+
         mediaSession = MediaSession.Builder(this, player).build()
     }
 
@@ -33,9 +33,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = mediaSession?.player
-        if (player != null) {
-            if (!player.playWhenReady || player.mediaItemCount == 0) {
+        val sessionPlayer = mediaSession?.player
+        if (sessionPlayer != null) {
+            if (!sessionPlayer.playWhenReady || sessionPlayer.mediaItemCount == 0) {
                 stopSelf()
             }
         }
