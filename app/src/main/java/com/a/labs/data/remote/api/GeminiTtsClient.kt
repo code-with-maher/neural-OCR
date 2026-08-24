@@ -132,16 +132,13 @@ class GeminiTtsClient(
 
             call.execute().use { response ->
                 if (!response.isSuccessful) {
-                    val error = response.body?.string().orEmpty()
+                    val error = response.body.string()
                     return@withContext Result.failure(
                         Exception("Gemini Interactions API error: ${response.code} - $error")
                     )
                 }
 
                 val body = response.body
-                    ?: return@withContext Result.failure(
-                        Exception("Empty response body from Gemini")
-                    )
 
                 BufferedReader(InputStreamReader(body.byteStream(), Charsets.UTF_8)).use { reader ->
                     var currentEventType: String? = null
