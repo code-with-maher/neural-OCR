@@ -37,7 +37,7 @@ jobs:
           EOF
 
       - name: 🔨 Build Release APK
-        run: ./kotlin --log-level=debug build --project-dir=app --platform=android -v release
+        run: ./kotlin --log-level=info build --project-dir=app --platform=android -v release
 
       - name: 🔍 Locate & bridge APK to conventional Gradle path
         id: find_apk
