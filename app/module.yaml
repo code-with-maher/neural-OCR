@@ -1,21 +1,28 @@
 product: android/app
 
 dependencies:
+  # Compose BOM ومكتبات واجهة المستخدم Jetpack Compose
   - bom: $libs.androidx.compose.bom
-  - $libs.androidx.compose.foundation
+  - $libs.androidx.compose.ui
   - $libs.androidx.compose.material3
   - $libs.androidx.compose.material.icons.extended
+  - $libs.androidx.compose.ui.tooling.preview
   - $libs.androidx.activity.compose
+
+  # مكتبات أندرويد الأساسية ودورة الحياة
   - $libs.androidx.core.ktx
   - $libs.androidx.core.splashscreen
   - $libs.androidx.lifecycle.runtime.ktx
   - $libs.androidx.navigation.compose
   - $libs.androidx.datastore.preferences
-  - $libs.okhttp
+  - $libs.androidx.work.runtime.ktx
+
+  # مكتبات Room (الـ Runtime فقط - بينما الـ Compiler تم نقله للإعدادات)
   - $libs.androidx.room.runtime
   - $libs.androidx.room.ktx
-  - $libs.androidx.room.common
-  - $libs.androidx.work.runtime.ktx
+
+  # مكتبات الطرف الثالث والوسائط
+  - $libs.okhttp
   - $libs.pdfbox.android
   - $libs.androidx.media3.exoplayer
   - $libs.androidx.media3.session
@@ -23,6 +30,7 @@ dependencies:
 settings:
   kotlin:
     version: "2.4.10"
+    # تفعيل الكومبايلر وتضمين Runtime + مكتبة الـ JSON تلقائياً دون إضافتها للمكتبات
     serialization: json
     ksp:
       version: "2.3.10"
@@ -30,14 +38,23 @@ settings:
         - $libs.androidx.room.compiler
       processorOptions:
         room.schemaLocation: "schemas"
+
+  jvm:
+    # يعوض خيارات sourceCompatibility و targetCompatibility و jvmTarget دفعة واحدة
+    release: 25
+
   compose:
     enabled: true
+
   android:
+    namespace: "com.a.labs"
+    applicationId: "com.a.labs"
     compileSdk: 37
     targetSdk: 37
     minSdk: 28
-    parcelize:
-      enabled: true
+    versionCode: 1
+    versionName: "1.0.0-beta-15-04-2026"
+    parcelize: enabled
     signing:
       enabled: true
       propertiesFile: ./keystore.properties
