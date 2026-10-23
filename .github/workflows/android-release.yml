@@ -24,14 +24,15 @@ jobs:
       - name: 🔑 Decode Keystore
         run: echo "${{ secrets.KEY }}" | base64 --decode > release.jks
 
-      - name: 🔨 Execute Build (Turbo Mode)
+      - name: 🔨 Execute Build (Turbo Mode & Warning Mode)
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease \
             --build-cache \
             --configuration-cache \
             --parallel \
-            --console=plain
+            --console=plain \
+            --warning-mode all
         env:
           KEYSTORE_PATH: ../release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
