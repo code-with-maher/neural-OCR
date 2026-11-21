@@ -1,3 +1,4 @@
+
 package com.a.labs.ui.settings
 
 import android.content.Intent
@@ -34,7 +35,9 @@ fun SettingsScreen(navController: NavHostController) {
     val elevenKey by settingsManager.elevenKey.collectAsState("")
     val elevenVoiceId by settingsManager.elevenVoiceId.collectAsState("GHszn56Ads7pHU1bODA2")
     val selectedEngine by settingsManager.ttsEngine.collectAsState("SYSTEM")
-    val selectedModel by settingsManager.geminiModel.collectAsState(GeminiModels.FLASH_3_1_LITE)
+    val selectedModel by settingsManager.geminiModel.collectAsState(
+        GeminiModels.availableModels.first()
+    )
     val chunkSize by settingsManager.chunkSize.collectAsState(15)
     val devModeUnlocked by settingsManager.isDevModeUnlocked.collectAsState(false)
     val loggingEnabled by settingsManager.isLoggingEnabled.collectAsState(false)
@@ -89,10 +92,10 @@ fun SettingsScreen(navController: NavHostController) {
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = { 
+                    TextButton(onClick = {
                         scope.launch { sheetState.hide() }.invokeOnCompletion { activeBottomSheet = null }
                     }) {
-                         Text("إلغاء")
+                        Text("إلغاء")
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = {
@@ -172,7 +175,7 @@ fun SettingsScreen(navController: NavHostController) {
                                 readOnly = true,
                                 label = { Text("نموذج الرؤية (OCR)") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modelExpanded) },
-                                 modifier = Modifier
+                                modifier = Modifier
                                     .menuAnchor(
                                         type = ExposedDropdownMenuAnchorType.PrimaryNotEditable
                                     )
@@ -185,7 +188,7 @@ fun SettingsScreen(navController: NavHostController) {
                                         modelExpanded = false
                                     })
                                 }
-                             }
+                            }
                         }
 
                         ExposedDropdownMenuBox(expanded = engineExpanded, onExpandedChange = { engineExpanded = !engineExpanded }) {
@@ -223,7 +226,7 @@ fun SettingsScreen(navController: NavHostController) {
                                         tempInput = elevenVoiceId
                                         activeBottomSheet = "ELEVEN_VOICE"
                                     },
-                                enabled = false, 
+                                enabled = false,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     disabledTextColor = MaterialTheme.colorScheme.onSurface,
                                     disabledBorderColor = MaterialTheme.colorScheme.outline,
@@ -244,7 +247,7 @@ fun SettingsScreen(navController: NavHostController) {
                         Slider(
                             value = chunkSize.toFloat(),
                             onValueChange = { scope.launch { settingsManager.saveSetting(SettingsManager.CHUNK_SIZE_KEY, it.toInt()) } },
-                             valueRange = 5f..40f,
+                            valueRange = 5f..40f,
                             steps = 6
                         )
                     }
@@ -274,7 +277,7 @@ fun SettingsScreen(navController: NavHostController) {
                                 headlineContent = { Text("عرض سجلات النظام", color = MaterialTheme.colorScheme.onErrorContainer) },
                                 leadingContent = { Icon(Icons.Default.BugReport, null, tint = MaterialTheme.colorScheme.onErrorContainer) },
                                 modifier = Modifier.clickable { navController.navigate("logs") },
-                                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
+                                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
                             )
                         }
                     }
@@ -312,5 +315,5 @@ fun SettingsScreen(navController: NavHostController) {
                 }
             }
         }
-      }
+    }
 }
