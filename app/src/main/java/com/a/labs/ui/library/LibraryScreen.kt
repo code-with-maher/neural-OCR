@@ -36,7 +36,10 @@ fun LibraryScreen(
     val activeBottomSheet by viewModel.activeBottomSheet.collectAsState()
     val readyToNavigateBookId by viewModel.readyToNavigateBookId.collectAsState()
 
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
+    )
 
     val pdfPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -186,10 +189,11 @@ fun LibraryScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         ListItem(
-                            headlineContent = { Text(book.title, fontWeight = FontWeight.Bold) },
                             supportingContent = { Text("عدد الصفحات: ${book.totalPages}") },
                             leadingContent = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, null) }
-                        )
+                        ) {
+                            Text(book.title, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
