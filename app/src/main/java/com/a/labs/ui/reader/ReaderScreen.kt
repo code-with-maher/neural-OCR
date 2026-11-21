@@ -1,10 +1,12 @@
+
 package com.a.labs.ui.reader
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,7 +43,10 @@ fun ReaderScreen(
     val audioError by viewModel.audioController.errorMessage.collectAsState()
 
     var activeBottomSheet by remember { mutableStateOf<String?>(null) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
+    )
 
     LaunchedEffect(bookId) {
         viewModel.loadBook(bookId)
