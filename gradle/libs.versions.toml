@@ -1,8 +1,10 @@
+
 [versions]
 agp = "9.5.1"
 kotlin = "2.4.21"
 ksp = "2.3.14"
 compileSdk = "37"
+compileSdkMinor = "2"
 minSdk = "28"
 targetSdk = "37"
 composeBom = "2026.11.01"
