@@ -1,3 +1,4 @@
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -8,7 +9,12 @@ plugins {
 
 android {
     namespace = "com.a.labs"
-    compileSdk = libs.versions.compileSdk.get().toInt()
+
+    compileSdk {
+        version = release(libs.versions.compileSdk.get().toInt()) {
+            minorApiLevel = libs.versions.compileSdkMinor.get().toInt()
+        }
+    }
 
     defaultConfig {
         applicationId = "com.a.labs"
@@ -75,7 +81,9 @@ kotlin {
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
-            output.outputFileName.set("Labs-${variant.name}-arm64-v8a-${android.defaultConfig.versionName}.apk")
+            output.outputFileName.set(
+                "Labs-${variant.name}-arm64-v8a-${android.defaultConfig.versionName}.apk"
+            )
         }
     }
 }
@@ -102,13 +110,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.androidx.room.runtime)
+    kapt(libs.androidx.room.compiler)
     implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
-
-    implementation(libs.okhttp)
-    implementation(libs.pdfbox.android)
-    implementation(libs.androidx.media3.exoplayer)
-    implementation(libs.androidx.media3.session)
-
-    implementation(libs.androidx.work.runtime.ktx)
 }
