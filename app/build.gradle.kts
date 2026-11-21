@@ -1,64 +1,70 @@
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.JavaVersion
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.room)
 }
 
 android {
     namespace = "com.a.labs"
 
     compileSdk {
-        version = release(libs.versions.compileSdk.get().toInt()) {
-            minorApiLevel = libs.versions.compileSdkMinor.get().toInt()
+        version = release(
+            libs.versions.compileSdk.get().toInt()
+        ) {
+            minorApiLevel =
+                libs.versions.compileSdkMinor.get().toInt()
         }
     }
 
     defaultConfig {
         applicationId = "com.a.labs"
+
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
+
         versionCode = 1
         versionName = "1.0.0-beta-15-04-2026"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
         ndk {
-            abiFilters.add("arm64-v8a")
+            abiFilters += "arm64-v8a"
         }
     }
 
     signingConfigs {
         create("mainConfig") {
-            val ksPath = System.getenv("KEYSTORE_PATH")
-            if (ksPath != null) {
-                storeFile = file(ksPath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
+            storeFile = file(
+                providers.environmentVariable("KEYSTORE_PATH").get()
+            )
+            storePassword =
+                providers.environmentVariable("KEYSTORE_PASSWORD").get()
+            keyAlias =
+                providers.environmentVariable("KEY_ALIAS").get()
+            keyPassword =
+                providers.environmentVariable("KEY_PASSWORD").get()
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("mainConfig")
             applicationIdSuffix = ".debug"
             isDebuggable = true
-
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("mainConfig")
         }
 
         release {
+            isDebuggable = false
+            isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("mainConfig")
 
-            optimization {
-                enable = true
-            }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt")
+            )
         }
     }
 
@@ -70,46 +76,70 @@ android {
     buildFeatures {
         compose = true
     }
-}
 
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_26)
-    }
-}
-
-androidComponents {
-    onVariants { variant ->
-        variant.outputs.forEach { output ->
-            output.outputFileName.set(
-                "Labs-${variant.name}-arm64-v8a-${android.defaultConfig.versionName}.apk"
-            )
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
 }
 
-room {
-    schemaDirectory("$projectDir/schemas")
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_26)
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
+    // Compose BOM
+    implementation(platform(libs.androidx.compose.bom))
+
+    // AndroidX Activity and Core
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.core.splashscreen)
 
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.activity.compose)
+    // Compose UI
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.runtime)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    debugImplementation(libs.androidx.compose.ui.tooling)
 
+    // Lifecycle and Navigation
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.navigation.compose)
+
+    // DataStore
     implementation(libs.androidx.datastore.preferences)
+
+    // Networking
+    implementation(libs.okhttp)
+
+    // Kotlin Serialization
     implementation(libs.kotlinx.serialization.json)
 
+    // Room
     implementation(libs.androidx.room.runtime)
-    ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // WorkManager
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // PDFBox
+    implementation(libs.pdfbox.android)
+
+    // Media3
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
+
+    // Compose Tooling
+    debugImplementation(libs.androidx.compose.ui.tooling)
 }
