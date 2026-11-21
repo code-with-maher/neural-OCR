@@ -1,3 +1,4 @@
+
 package com.a.labs.data.local
 
 import android.content.Context
@@ -29,7 +30,7 @@ class SettingsManager(private val context: Context) {
     val elevenKey: Flow<String> = context.dataStore.data.map { it[ELEVEN_KEY] ?: "" }
     val elevenVoiceId: Flow<String> = context.dataStore.data.map { it[ELEVEN_VOICE_ID] ?: "GHszn56Ads7pHU1bODA2" }
     val ttsEngine: Flow<String> = context.dataStore.data.map { it[TTS_ENGINE] ?: "SYSTEM" }
-    val geminiModel: Flow<String> = context.dataStore.data.map { it[GEMINI_MODEL_KEY] ?: GeminiModels.FLASH_3_1_LITE }
+    val geminiModel: Flow<String> = context.dataStore.data.map { it[GEMINI_MODEL_KEY] ?: GeminiModels.FLASH_3_5 }
     val chunkSize: Flow<Int> = context.dataStore.data.map { it[CHUNK_SIZE_KEY] ?: 15 }
     val isDevModeUnlocked: Flow<Boolean> = context.dataStore.data.map { it[DEV_MODE_UNLOCKED] ?: false }
     val isLoggingEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOGGING_ENABLED] ?: false }
